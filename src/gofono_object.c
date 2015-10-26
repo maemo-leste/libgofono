@@ -75,7 +75,6 @@ struct ofono_object_priv {
     const OfonoObjectState* state;
     OfonoObjectStateCall* init_call;
     gboolean invalid;
-    gboolean have_properties;
     gulong property_changed_signal_id;
     GHashTable* properties;
     GList* pending_calls;
@@ -413,9 +412,7 @@ ofono_object_state_init_proxy_finish(
             priv->property_changed_signal_id = g_signal_connect(
                 priv->proxy, PROXY_SIGNAL_PROPERTY_CHANGED_NAME,
                 G_CALLBACK(ofono_object_property_changed), object);
-            next = priv->have_properties ?
-                &OFONO_OBJECT_STATE_OK :
-                &OFONO_OBJECT_STATE_INIT_PROPERTIES;
+            next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
         } else {
             next = klass->fn_initialized(object) ?
                 &OFONO_OBJECT_STATE_OK :
@@ -792,7 +789,6 @@ ofono_object_apply_properties(
     } else {
         ofono_object_reset_properties(self);
     }
-    priv->have_properties = TRUE;
 }
 
 GVariant*
@@ -1277,7 +1273,6 @@ ofono_object_invalidate(
     OfonoObjectPriv* priv = self->priv;
     GASSERT(priv->invalid);
     ofono_object_update_valid(self);
-    priv->have_properties = FALSE;
     ofono_object_reset_properties(self);
     g_list_foreach(priv->pending_calls, ofono_object_cancel_call, NULL);
     if (priv->state->fn_invalidate) {
