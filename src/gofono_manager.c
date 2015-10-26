@@ -151,6 +151,7 @@ ofono_manager_add_modem(
             OfonoModem* modem = ofono_modem_added(path, properties);
             g_ptr_array_add(priv->modems, g_strdup(path));
             g_ptr_array_sort(priv->modems, ofono_manager_sort_modems);
+            ofono_object_set_invalid(&modem->object, !self->valid);
             g_signal_emit(self, ofono_manager_signals[
                 MANAGER_SIGNAL_MODEM_ADDED], 0, modem);
             ofono_modem_unref(modem);
