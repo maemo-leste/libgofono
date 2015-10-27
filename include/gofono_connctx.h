@@ -303,11 +303,11 @@ ofono_connctx_object(OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) ? &ctx->object : NULL; }
 
 G_INLINE_FUNC const char*
-ofono_connctx_path(OfonoConnCtx* ctx)
+ofono_connctx_path(const OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) ? ctx->object.path : NULL; }
 
 G_INLINE_FUNC gboolean
-ofono_connctx_valid(OfonoConnCtx* ctx)
+ofono_connctx_valid(const OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) && ctx->object.valid; }
 
 G_INLINE_FUNC gboolean

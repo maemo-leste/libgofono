@@ -52,7 +52,7 @@ struct ofono_connmgr_priv {
     const char* name;
     gulong proxy_handler_id[PROXY_HANDLER_COUNT];
     GCancellable* cancel_setup;
-    GHashTable* contexts;
+    GPtrArray* contexts;
     guint flags;
 
 #define CONNMGR_FLAG_SETUP_DONE         (0x01)
@@ -95,18 +95,55 @@ static guint ofono_connmgr_signals[CONNMGR_SIGNAL_COUNT] = { 0 };
 
 static
 void
+ofono_connmgr_context_free(
+    gpointer data)
+{
+    ofono_connctx_unref(data);
+}
+
+static
+gint
+ofono_connmgr_context_compare(
+    gconstpointer a,
+    gconstpointer b)
+{
+    OfonoConnCtx** ctx1 = a;
+    OfonoConnCtx** ctx2 = b;
+    return g_strcmp0(ofono_connctx_path(*ctx1), ofono_connctx_path(*ctx2));
+}
+
+static
+int
+ofono_connmgr_find_context(
+    OfonoConnMgr* self,
+    const char* path)
+{
+    if (path) {
+        GPtrArray* list = self->priv->contexts;
+        int i, n = list->len;
+        for (i=0; i<n; i++) {
+            OfonoConnCtx* ctx = OFONO_CONNCTX(list->pdata[i]);
+            if (!g_strcmp0(path, ofono_connctx_path(ctx))) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+static
+void
 ofono_connmgr_add_context(
     OfonoConnMgr* self,
     const char* path,
     GVariant* props)
 {
     OfonoConnMgrPriv* priv = self->priv;
-    if (path && props && !g_hash_table_contains(priv->contexts, path)) {
+    if (path && props && ofono_connmgr_find_context(self, path) < 0) {
         OfonoConnCtx* ctx = ofono_connctx_new_internal(path, props);
-        if (ctx) {
-            g_hash_table_replace(priv->contexts, (void*)ctx->object.path, ctx);
-            CONNMGR_OBJECT_SIGNAL_EMIT(self, CONTEXT_ADDED, ctx);
-        }
+        g_ptr_array_add(priv->contexts, ctx);
+        g_ptr_array_sort(priv->contexts, ofono_connmgr_context_compare);
+        CONNMGR_OBJECT_SIGNAL_EMIT(self, CONTEXT_ADDED, ctx);
     }
 }
 
@@ -130,12 +167,12 @@ ofono_connmgr_context_removed(
     gpointer data)
 {
     OfonoConnMgr* self = OFONO_CONNMGR(data);
-    OfonoConnMgrPriv* priv = self->priv;
-    OfonoConnCtx* ctx = g_hash_table_lookup(priv->contexts, path);
+    int i = ofono_connmgr_find_context(self, path);
     GVERBOSE_("%s", path);
-    if (ctx) {
-        ofono_connctx_ref(ctx);
-        g_hash_table_remove(priv->contexts, path);
+    if (i >= 0) {
+        OfonoConnMgrPriv* priv = self->priv;
+        OfonoConnCtx* ctx = ofono_connctx_ref(priv->contexts->pdata[i]);
+        g_ptr_array_remove_index(priv->contexts, i);
         CONNMGR_OBJECT_SIGNAL_EMIT(self, CONTEXT_REMOVED, ctx);
         ofono_connctx_unref(ctx);
     }
@@ -260,28 +297,17 @@ ofono_connmgr_unref(
     }
 }
 
-static
-void
-ofono_connmgr_context_list_free(
-    gpointer data)
-{
-    ofono_connctx_unref(data);
-}
-
 GPtrArray*
 ofono_connmgr_get_contexts(
     OfonoConnMgr* self)
 {
     GPtrArray* contexts = NULL;
-    if (G_LIKELY(self)) { 
-        GHashTableIter it;
-        gpointer key, value;
-        GHashTable* table = self->priv->contexts;
-        contexts = g_ptr_array_new_full(g_hash_table_size(table),
-            ofono_connmgr_context_list_free);
-        g_hash_table_iter_init(&it, table);
-        while (g_hash_table_iter_next(&it, &key, &value)) {
-            g_ptr_array_add(contexts, ofono_connctx_ref(value));
+    if (G_LIKELY(self)) {
+        GPtrArray* list = self->priv->contexts;
+        guint i, n = list->len;
+        contexts = g_ptr_array_new_full(n, ofono_connmgr_context_free);
+        for (i=0; i<n; i++) {
+            g_ptr_array_add(contexts, ofono_connctx_ref(list->pdata[i]));
         }
     }
     return contexts;
@@ -293,11 +319,10 @@ ofono_connmgr_get_context_for_type(
     OFONO_CONNCTX_TYPE type)
 {
     if (G_LIKELY(self) && G_LIKELY(type >= OFONO_CONNCTX_TYPE_NONE)) {
-        GHashTableIter it;
-        gpointer key, value;
-        g_hash_table_iter_init(&it, self->priv->contexts);
-        while (g_hash_table_iter_next(&it, &key, &value)) {
-            OfonoConnCtx* context = OFONO_CONNCTX(value);
+        GPtrArray* list = self->priv->contexts;
+        int i, n = list->len;
+        for (i=0; i<n; i++) {
+            OfonoConnCtx* context = OFONO_CONNCTX(list->pdata[i]);
             if (context->type == type || type == OFONO_CONNCTX_TYPE_NONE) {
                 return context;
             }
@@ -312,14 +337,14 @@ ofono_connmgr_get_context_for_path(
     const char* path)
 {
     if (G_LIKELY(self)) {
-        GHashTableIter it;
-        gpointer key, value;
-        g_hash_table_iter_init(&it, self->priv->contexts);
-        while (g_hash_table_iter_next(&it, &key, &value)) {
-            OfonoConnCtx* context = OFONO_CONNCTX(value);
-            if (!path || !g_strcmp0(path, context->object.path)) {
-                return context;
+        GPtrArray* list = self->priv->contexts;
+        if (path) {
+            int i = ofono_connmgr_find_context(self, path);
+            if (i >= 0) {
+                return OFONO_CONNCTX(list->pdata[i]);
             }
+        } else if (list->len > 0) {
+            return OFONO_CONNCTX(list->pdata[0]);
         }
     }
     return NULL;
@@ -410,14 +435,6 @@ ofono_connmgr_remove_handler(
  * Internals
  *==========================================================================*/
 
-static
-void
-ofono_connmgr_hash_remove_context(
-    gpointer data)
-{
-    ofono_connctx_unref(data);
-}
-
 /**
  * Reset the object after it has become invalid.
  */
@@ -452,8 +469,7 @@ ofono_connmgr_init(
     OfonoConnMgrPriv* priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_CONNMGR, OfonoConnMgrPriv);
     self->priv = priv;
-    priv->contexts = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
-        ofono_connmgr_hash_remove_context);
+    priv->contexts = g_ptr_array_new_with_free_func(ofono_connmgr_context_free);
 }
 
 /**
@@ -465,7 +481,7 @@ ofono_connmgr_finalize(
     GObject* object)
 {
     OfonoConnMgr* self = OFONO_CONNMGR(object);
-    g_hash_table_destroy(self->priv->contexts);
+    g_ptr_array_free(self->priv->contexts, TRUE);
     G_OBJECT_CLASS(ofono_connmgr_parent_class)->finalize(object);
 }
 
