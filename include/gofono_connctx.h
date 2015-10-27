@@ -104,14 +104,14 @@ typedef
 void
 (*OfonoConnCtxErrorHandler)(
     OfonoConnCtx* sender,
-    GError* error,
+    const GError* error,
     void* arg);
 
 typedef
 void
 (*OfonoConnCtxCallHandler)(
     OfonoConnCtx* sender,
-    GError* error,
+    const GError* error,
     void* arg);
 
 typedef

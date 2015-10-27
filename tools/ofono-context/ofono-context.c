@@ -263,7 +263,7 @@ static
 void
 action_async_completion(
     OfonoConnCtx* obj,
-    GError* error,
+    const GError* error,
     void* arg)
 {
     Context* ctx = arg;
