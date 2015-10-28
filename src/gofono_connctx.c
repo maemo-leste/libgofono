@@ -853,6 +853,12 @@ ofono_connctx_property_settings_apply(
         GDEBUG("Interface: %s", ifname ? ifname : "<none>");
         self->ifname = ifname;
         CONNCTX_SIGNAL_EMIT(self, INTERFACE);
+    } else {
+        /*
+         * In any case update the public pointer because it may point to the
+         * string which ofono_connctx_settings_clear is about de deallocate
+         */
+        self->ifname = ifname;
     }
 
     ofono_connctx_settings_clear(&old);
