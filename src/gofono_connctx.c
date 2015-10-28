@@ -856,7 +856,7 @@ ofono_connctx_property_settings_apply(
     } else {
         /*
          * In any case update the public pointer because it may point to the
-         * string which ofono_connctx_settings_clear is about de deallocate
+         * string which ofono_connctx_settings_clear is about to deallocate
          */
         self->ifname = ifname;
     }
