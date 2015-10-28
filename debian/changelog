@@ -1,3 +1,18 @@
+libgofono (1.0.3) unstable; urgency=low
+
+  * More const pointers
+  * Maintain predicatable order of contexts
+  * Fixed possible read after free
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 28 Oct 2015 12:40:44 +0300
+
+libgofono (1.0.2) unstable; urgency=low
+
+  * Request initial properties for all objects
+  * Reset 'invalid' flags for newly added modems
+
+ -- Slava Monich <slava.monich@jolla.com>  Mon, 26 Oct 2015 13:30:23 +0200
+
 libgofono (1.0.0) unstable; urgency=low
 
   * Initial release
