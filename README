@@ -1,0 +1,13 @@
+This is a glib-based wrapper for ofono D-Bus interfaces.
+
+It is not by no means complete. Only the following interfaces are
+fully supported fo far:
+
+* org.ofono.Manager
+* org.ofono.Modem
+* org.ofono.SimManager
+* org.ofono.ConnectionManager
+* org.ofono.ConnectionContext
+* org.ofono.NetworkRegistration
+
+More interfaces may be supported in the future when needed.
