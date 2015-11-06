@@ -1,3 +1,11 @@
+libgofono (1.0.4) unstable; urgency=low
+
+  * Fixed compilation warning
+  * Added ofono_simmgr_wait_valid() function
+  * Bump object reference for the duration of ofono_condition_wait()
+
+ -- Slava Monich <slava.monich@jolla.com>  Fri, 06 Nov 2015 23:34:37 +0300
+
 libgofono (1.0.3) unstable; urgency=low
 
   * More const pointers

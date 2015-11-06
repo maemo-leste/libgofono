@@ -20,7 +20,7 @@ all: debug release pkgconfig
 
 VERSION_MAJOR = 1
 VERSION_MINOR = 0
-VERSION_RELEASE = 0
+VERSION_RELEASE = 4
 
 NAME = gofono
 LIB_NAME = lib$(NAME)
