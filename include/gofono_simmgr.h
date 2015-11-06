@@ -137,6 +137,10 @@ G_INLINE_FUNC gboolean
 ofono_simmgr_valid(OfonoSimMgr* sim)
     { return G_LIKELY(sim) && sim->intf.object.valid; }
 
+G_INLINE_FUNC gboolean
+ofono_simmgr_wait_valid(OfonoSimMgr* sim, int msec, GError** error)
+    { return ofono_object_wait_valid(ofono_simmgr_object(sim), msec, error); }
+
 G_INLINE_FUNC void
 ofono_simmgr_remove_handlers(OfonoSimMgr* sim, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_simmgr_object(sim), ids, n); }
