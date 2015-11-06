@@ -1,3 +1,9 @@
+libgofono (1.0.5) unstable; urgency=low
+
+  * Use three-digit version for pkg-config
+
+ -- Slava Monich <slava.monich@jolla.com>  Sat, 07 Nov 2015 00:16:33 +0300
+
 libgofono (1.0.4) unstable; urgency=low
 
   * Fixed compilation warning
