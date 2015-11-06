@@ -74,8 +74,10 @@ ofono_condition_wait_internal(
     int timeout_msec,
     GError** error)
 {
+    gboolean ok;
     OfonoConditionWaitData wait;
     const gulong id = add_handler(object, ofono_condition_wait_handler, &wait);
+    g_object_ref(object);
     memset(&wait, 0, sizeof(wait));
     wait.loop = g_main_loop_new(NULL, TRUE);
     wait.check = check;
@@ -89,7 +91,9 @@ ofono_condition_wait_internal(
 
     remove_handler(object, id);
     if (wait.timeout_id) g_source_remove(wait.timeout_id);
-    if (check(object)) {
+    ok = check(object);
+    g_object_unref(object);
+    if (ok) {
         return TRUE;
     } else {
         if (error) {
