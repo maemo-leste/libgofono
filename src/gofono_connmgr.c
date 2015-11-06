@@ -107,8 +107,8 @@ ofono_connmgr_context_compare(
     gconstpointer a,
     gconstpointer b)
 {
-    OfonoConnCtx** ctx1 = a;
-    OfonoConnCtx** ctx2 = b;
+    OfonoConnCtx* const* ctx1 = a;
+    OfonoConnCtx* const* ctx2 = b;
     return g_strcmp0(ofono_connctx_path(*ctx1), ofono_connctx_path(*ctx2));
 }
 
