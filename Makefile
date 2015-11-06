@@ -22,6 +22,9 @@ VERSION_MAJOR = 1
 VERSION_MINOR = 0
 VERSION_RELEASE = 4
 
+# Version for pkg-config
+PCVERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_RELEASE)
+
 NAME = gofono
 LIB_NAME = lib$(NAME)
 LIB_DEV_SYMLINK = $(LIB_NAME).so
@@ -192,7 +195,7 @@ $(RELEASE_LINK):
 	ln -sf $(LIB) $@
 
 $(PKGCONFIG): $(LIB_NAME).pc.in
-	sed -e 's/\[version\]/'$(VERSION_MAJOR).$(VERSION_MINOR)/g $< > $@
+	sed -e 's/\[version\]/'$(PCVERSION)/g $< > $@
 
 #
 # Install
