@@ -244,7 +244,7 @@ ofono_connctx_settings_decode(
 
     /* PrefixLength */
     y = 0;
-    if (g_variant_lookup(dict, OFONO_CONNCTX_SETTINGS_PREFIX_LENGTH, "&y", &y)) {
+    if (g_variant_lookup(dict, OFONO_CONNCTX_SETTINGS_PREFIX_LENGTH, "y", &y)) {
         settings->pub.prefix = y;
         empty = FALSE;
     }
