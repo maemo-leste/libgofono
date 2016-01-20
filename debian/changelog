@@ -1,3 +1,9 @@
+libgofono (1.0.7) unstable; urgency=low
+
+  * Don't emit "gofono-modem-added" before OfonoManager is valid
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 20 Jan 2016 21:55:27 +0200
+
 libgofono (1.0.6) unstable; urgency=low
 
   * Fixed a bug in decoding ConnectionContext settings
