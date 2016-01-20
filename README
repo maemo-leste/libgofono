@@ -1,6 +1,6 @@
 This is a glib-based wrapper for ofono D-Bus interfaces.
 
-It is not by no means complete. Only the following interfaces are
+It is not by any means complete. Only the following interfaces are
 fully supported fo far:
 
 * org.ofono.Manager
