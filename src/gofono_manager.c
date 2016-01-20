@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -152,8 +152,10 @@ ofono_manager_add_modem(
             g_ptr_array_add(priv->modems, g_strdup(path));
             g_ptr_array_sort(priv->modems, ofono_manager_sort_modems);
             ofono_object_set_invalid(&modem->object, !self->valid);
-            g_signal_emit(self, ofono_manager_signals[
-                MANAGER_SIGNAL_MODEM_ADDED], 0, modem);
+            if (self->valid) {
+                g_signal_emit(self, ofono_manager_signals[
+                    MANAGER_SIGNAL_MODEM_ADDED], 0, modem);
+            }
             ofono_modem_unref(modem);
         }
     }
