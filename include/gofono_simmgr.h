@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -46,6 +46,7 @@ struct ofono_simmgr {
     const char* imsi;                   /* SubscriberIdentity */
     const char* mcc;                    /* MobileCountryCode */
     const char* mnc;                    /* MobileNetworkCode */
+    const char* spn;                    /* ServiceProviderName */
 };
 
 GType ofono_simmgr_get_type(void);
@@ -108,6 +109,12 @@ ofono_simmgr_add_mcc_changed_handler(
 
 gulong
 ofono_simmgr_add_mnc_changed_handler(
+    OfonoSimMgr* sim,
+    OfonoSimMgrHandler handler,
+    void* arg);
+
+gulong
+ofono_simmgr_add_spn_changed_handler(
     OfonoSimMgr* sim,
     OfonoSimMgrHandler handler,
     void* arg);

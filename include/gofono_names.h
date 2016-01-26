@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -83,6 +83,7 @@
 #define OFONO_SIMMGR_PROPERTY_IMSI                "SubscriberIdentity"
 #define OFONO_SIMMGR_PROPERTY_MCC                 "MobileCountryCode"
 #define OFONO_SIMMGR_PROPERTY_MNC                 "MobileNetworkCode"
+#define OFONO_SIMMGR_PROPERTY_SPN                 "ServiceProviderName"
 
 /* org.ofono.ConnectionManager */
 #define OFONO_CONNMGR_PROPERTY_ATTACHED           "Attached"

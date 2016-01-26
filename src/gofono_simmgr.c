@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -46,6 +46,7 @@ struct ofono_simmgr_priv {
     char* imsi;
     char* mcc;
     char* mnc;
+    char* spn;
 };
 
 typedef OfonoModemInterfaceClass OfonoSimMgrClass;
@@ -55,6 +56,7 @@ G_DEFINE_TYPE(OfonoSimMgr, ofono_simmgr, OFONO_TYPE_MODEM_INTERFACE)
 #define SIMMGR_SIGNAL_IMSI_CHANGED_NAME    "imsi-changed"
 #define SIMMGR_SIGNAL_MCC_CHANGED_NAME     "mcc-changed"
 #define SIMMGR_SIGNAL_MNC_CHANGED_NAME     "mnc-changed"
+#define SIMMGR_SIGNAL_SPN_CHANGED_NAME     "spn-changed"
 
 /*==========================================================================*
  * Implementation
@@ -175,6 +177,16 @@ ofono_simmgr_add_mnc_changed_handler(
 }
 
 gulong
+ofono_simmgr_add_spn_changed_handler(
+    OfonoSimMgr* self,
+    OfonoSimMgrHandler fn,
+    void* arg)
+{
+    return (G_LIKELY(self) && G_LIKELY(fn)) ? g_signal_connect(self,
+        SIMMGR_SIGNAL_SPN_CHANGED_NAME, G_CALLBACK(fn), arg) : 0;
+}
+
+gulong
 ofono_simmgr_add_present_changed_handler(
     OfonoSimMgr* self,
     OfonoSimMgrHandler fn,
@@ -242,6 +254,7 @@ ofono_simmgr_finalize(
     g_free(priv->imsi);
     g_free(priv->mcc);
     g_free(priv->mnc);
+    g_free(priv->spn);
     G_OBJECT_CLASS(ofono_simmgr_parent_class)->finalize(object);
 }
 
@@ -257,7 +270,8 @@ ofono_simmgr_class_init(
         SIMMGR_DEFINE_PROPERTY_BOOL(PRESENT,present),
         SIMMGR_DEFINE_PROPERTY_STRING(IMSI,imsi),
         SIMMGR_DEFINE_PROPERTY_STRING(MCC,mcc),
-        SIMMGR_DEFINE_PROPERTY_STRING(MNC,mnc)
+        SIMMGR_DEFINE_PROPERTY_STRING(MNC,mnc),
+        SIMMGR_DEFINE_PROPERTY_STRING(SPN,spn)
     };
 
     OfonoObjectClass* ofono = &klass->object;
