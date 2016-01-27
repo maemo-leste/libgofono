@@ -31,10 +31,12 @@
  */
 
 #include "gofono_object_p.h"
+#include "gofono_error_p.h"
 #include "gofono_util_p.h"
 #include "gofono_names.h"
-#include "gofono_error.h"
 #include "gofono_log.h"
+
+#define OFONO_BUSY_RETRY_DELAY (200) /* ms */
 
 /* Object state */
 typedef struct ofono_object_state OfonoObjectState;
@@ -51,7 +53,8 @@ struct ofono_object_state {
         OfonoObject* object);
     const OfonoObjectState* (*fn_finish)(
         OfonoObjectStateCall* call,
-        GAsyncResult* result);
+        GAsyncResult* result,
+        int* retry_ms);
     void (*fn_invalidate)(
         const OfonoObjectState* state,
         OfonoObject* object);
@@ -75,6 +78,7 @@ struct ofono_object_priv {
     GDBusProxy* proxy;
     const OfonoObjectState* state;
     OfonoObjectStateCall* init_call;
+    guint init_retry_id;
     gboolean invalid;
     gulong property_changed_signal_id;
     GHashTable* properties;
@@ -332,6 +336,10 @@ ofono_object_cancel_init_call(
         g_cancellable_cancel(priv->init_call->cancellable);
         priv->init_call = NULL;
     }
+    if (priv->init_retry_id) {
+        g_source_remove(priv->init_retry_id);
+        priv->init_retry_id = 0;
+    }
 }
 
 static
@@ -341,6 +349,7 @@ ofono_object_update_state(
     const OfonoObjectState* next)
 {
     ofono_object_cancel_init_call(self);
+    GASSERT(next);
     if (next) {
         OfonoObjectPriv* priv = self->priv;
         if (next->fn_start) {
@@ -356,6 +365,21 @@ ofono_object_update_state(
 }
 
 static
+gboolean
+ofono_object_state_retry(
+    gpointer user_data)
+{
+    OfonoObject* self = user_data;
+    OfonoObjectPriv* priv = self->priv;
+    GASSERT(priv->init_retry_id);
+    GASSERT(!priv->init_call);
+    priv->init_retry_id = 0;
+    GDEBUG("Retrying %s", priv->state->name);
+    ofono_object_update_state(self, priv->state);
+    return FALSE;
+}
+
+static
 void
 ofono_object_state_call_complete(
     GObject* proxy,
@@ -364,10 +388,25 @@ ofono_object_state_call_complete(
 {
     OfonoObjectStateCall* call = data;
     OfonoObjectPriv* priv = call->object->priv;
+    GASSERT(!priv->init_retry_id);
     if (priv->init_call == call) {
+        int retry_ms = -1;
+        const OfonoObjectState* next =
+            call->state->fn_finish(call, result, &retry_ms);
         priv->init_call = NULL;
-        ofono_object_update_state(call->object,
-            call->state->fn_finish(call, result));
+        GASSERT(next);
+        if (retry_ms >= 0) {
+
+            /*
+             * Postpone entering (or re-entering) this state after
+             * org.ofono.Error.InProgress or a D-Bus timeout.
+             */
+            priv->state = next;
+            priv->init_retry_id = g_timeout_add(retry_ms,
+                ofono_object_state_retry, call->object);
+        } else {
+            ofono_object_update_state(call->object, next);
+        }
     }
     ofono_object_state_call_free(call);
 }
@@ -394,7 +433,8 @@ static
 const OfonoObjectState*
 ofono_object_state_init_proxy_finish(
     OfonoObjectStateCall* call,
-    GAsyncResult* result)
+    GAsyncResult* result,
+    int* retry_ms)
 {
     GError* error = NULL;
     OfonoObject* object = call->object;
@@ -458,7 +498,8 @@ static
 const OfonoObjectState*
 ofono_object_state_init_properties_finish(
     OfonoObjectStateCall* call,
-    GAsyncResult* result)
+    GAsyncResult* result,
+    int* retry_ms)
 {
     GError* error = NULL;
     GVariant* properties = NULL;
@@ -476,7 +517,18 @@ ofono_object_state_init_properties_finish(
         next = klass->fn_initialized(object) ?
             &OFONO_OBJECT_STATE_OK :
             &OFONO_OBJECT_STATE_POST_INIT;
+    } else if (ofono_error_is_generic_timeout(error)) {
+        /* Retry immediately */
+        GWARN("%s", GERRMSG(error));
+        next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
+        *retry_ms = 0;
+    } else if (error->domain == OFONO_ERROR && error->code == OFONO_ERROR_BUSY) {
+        /* Retry after delay */
+        GWARN("%s", GERRMSG(error));
+        next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
+        *retry_ms = OFONO_BUSY_RETRY_DELAY;
     } else {
+        /* Something unrecoverable, it seems */
         next = NULL;
         priv->invalid = TRUE;
 #if GUTIL_LOG_ERR
@@ -703,7 +755,8 @@ ofono_object_update_valid(
     OfonoObject* self)
 {
     OfonoObjectPriv* priv = self->priv;
-    const gboolean valid = !priv->invalid && priv->state->can_be_valid;
+    const gboolean valid = !priv->invalid && priv->state->can_be_valid &&
+        !priv->init_call && !priv->init_retry_id;
     if (self->valid != valid) {
         self->valid = valid;
         OFONO_OBJECT_GET_CLASS(self)->fn_valid_changed(self);
