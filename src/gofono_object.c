@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -33,6 +33,7 @@
 #include "gofono_object_p.h"
 #include "gofono_util_p.h"
 #include "gofono_names.h"
+#include "gofono_error.h"
 #include "gofono_log.h"
 
 /* Object state */
@@ -1398,6 +1399,9 @@ ofono_object_class_init(
             G_OBJECT_CLASS_TYPE(klass), G_SIGNAL_RUN_FIRST | G_SIGNAL_DETAILED,
             0, NULL, NULL, NULL, G_TYPE_NONE,
             2, G_TYPE_STRING, G_TYPE_VARIANT);
+
+    /* Register ofono errors with gio */
+    ofono_error_quark();
 }
 
 /*

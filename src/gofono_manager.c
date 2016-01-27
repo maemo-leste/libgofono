@@ -35,6 +35,7 @@
 #include "gofono_util_p.h"
 #include "gofono_object_p.h"
 #include "gofono_modem_p.h"
+#include "gofono_error.h"
 #include "gofono_log.h"
 
 /* Generated headers */
@@ -592,6 +593,9 @@ ofono_manager_class_init(
         g_signal_new(MANAGER_SIGNAL_MODEM_REMOVED_NAME,
             G_OBJECT_CLASS_TYPE(klass), G_SIGNAL_RUN_FIRST,
             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+
+    /* Register ofono errors with gio */
+    ofono_error_quark();
 }
 
 /*
