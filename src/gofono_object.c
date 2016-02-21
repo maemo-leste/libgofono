@@ -36,6 +36,8 @@
 #include "gofono_names.h"
 #include "gofono_log.h"
 
+#include <gutil_misc.h>
+
 #define OFONO_BUSY_RETRY_DELAY (200) /* ms */
 
 /* Object state */
@@ -1005,15 +1007,7 @@ ofono_object_remove_handlers(
     gulong* ids,
     unsigned int count)
 {
-    if (G_LIKELY(self)) {
-        unsigned int i;
-        for (i=0; i<count; i++) {
-            if (G_LIKELY(ids[i])) {
-                g_signal_handler_disconnect(self, ids[i]);
-                ids[i] = 0;
-            }
-        }
-    }
+    gutil_disconnect_handlers(self, ids, count);
 }
 
 void

@@ -38,6 +38,8 @@
 #include "gofono_error.h"
 #include "gofono_log.h"
 
+#include <gutil_misc.h>
+
 /* Generated headers */
 #include "org.ofono.Manager.h"
 
@@ -465,15 +467,7 @@ ofono_manager_remove_handlers(
     gulong* ids,
     unsigned int count)
 {
-    if (G_LIKELY(self)) {
-        unsigned int i;
-        for (i=0; i<count; i++) {
-            if (G_LIKELY(ids[i])) {
-                g_signal_handler_disconnect(self, ids[i]);
-                ids[i] = 0;
-            }
-        }
-    }
+    gutil_disconnect_handlers(self, ids, count);
 }
 
 static
