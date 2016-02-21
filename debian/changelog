@@ -1,3 +1,9 @@
+libgofono (1.0.10) unstable; urgency=low
+
+  * Use gutil_disconnect_handlers from libglibutil
+
+ -- Slava Monich <slava.monich@jolla.com>  Sun, 21 Feb 2016 11:55:43 +0300
+
 libgofono (1.0.9) unstable; urgency=low
 
   * Assign error codes to ofono D-Bus errors
