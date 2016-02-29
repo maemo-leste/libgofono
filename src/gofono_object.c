@@ -106,12 +106,12 @@ typedef struct ofono_object_pending_call_priv {
     OfonoObjectProxyCallFinishedCallback finished;
 } OfonoObjectPendingCallPriv;
 
-G_INLINE_FUNC OfonoObjectPendingCallPriv*
+OFONO_INLINE OfonoObjectPendingCallPriv*
 ofono_object_pending_call_cast(OfonoObjectPendingCall* call)
     { return G_CAST(call, OfonoObjectPendingCallPriv, call); }
 
 #ifdef DEBUG
-G_INLINE_FUNC OfonoObject* ofono_object_check(OfonoObject* obj) { return obj; }
+OFONO_INLINE OfonoObject* ofono_object_check(OfonoObject* obj) { return obj; }
 #else
 #  define ofono_object_check(obj) obj
 #endif

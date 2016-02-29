@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -298,23 +298,23 @@ ofono_connctx_provision_full(
 
 /* Inline wrappers */
 
-G_INLINE_FUNC OfonoObject*
+OFONO_INLINE OfonoObject*
 ofono_connctx_object(OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) ? &ctx->object : NULL; }
 
-G_INLINE_FUNC const char*
+OFONO_INLINE const char*
 ofono_connctx_path(const OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) ? ctx->object.path : NULL; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_connctx_valid(const OfonoConnCtx* ctx)
     { return G_LIKELY(ctx) && ctx->object.valid; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_connctx_wait_valid(OfonoConnCtx* ctx, int msec, GError** error)
     { return ofono_object_wait_valid(ofono_connctx_object(ctx), msec, error); }
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_connctx_remove_handlers(OfonoConnCtx* ctx, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_connctx_object(ctx), ids, n); }
 

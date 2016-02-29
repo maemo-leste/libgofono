@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -151,23 +151,23 @@ ofono_connmgr_remove_handler(
 
 /* Inline wrappers */
 
-G_INLINE_FUNC OfonoObject*
+OFONO_INLINE OfonoObject*
 ofono_connmgr_object(OfonoConnMgr* mgr)
     { return G_LIKELY(mgr) ? &mgr->intf.object : NULL; }
 
-G_INLINE_FUNC const char*
+OFONO_INLINE const char*
 ofono_connmgr_path(OfonoConnMgr* mgr)
     { return G_LIKELY(mgr) ? mgr->intf.object.path : NULL; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_connmgr_valid(OfonoConnMgr* mgr)
     { return G_LIKELY(mgr) && mgr->intf.object.valid; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_connmgr_wait_valid(OfonoConnMgr* mgr, int msec, GError** error)
     { return ofono_object_wait_valid(ofono_connmgr_object(mgr), msec, error); }
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_connmgr_remove_handlers(OfonoConnMgr* mgr, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_connmgr_object(mgr), ids, n); }
 

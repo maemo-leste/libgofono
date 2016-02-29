@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -194,7 +194,7 @@ ofono_modem_manager_valid_changed(
         !ofono_manager_has_modem(manager, modem->object.path));
 }
 
-G_INLINE_FUNC
+OFONO_INLINE
 GCancellable*
 ofono_modem_set_boolean_full(
     OfonoModem* self,

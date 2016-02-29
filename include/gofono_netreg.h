@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -204,19 +204,19 @@ ofono_netreg_remove_handler(
 
 /* Inline wrappers */
 
-G_INLINE_FUNC OfonoObject*
+OFONO_INLINE OfonoObject*
 ofono_netreg_object(OfonoNetReg* netreg)
     { return &netreg->intf.object; }
 
-G_INLINE_FUNC const char*
+OFONO_INLINE const char*
 ofono_netreg_path(OfonoNetReg* netreg)
     { return G_LIKELY(netreg) ? netreg->intf.object.path : NULL; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_netreg_valid(OfonoNetReg* netreg)
     { return G_LIKELY(netreg) && netreg->intf.object.valid; }
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_netreg_remove_handlers(OfonoNetReg* netreg, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_netreg_object(netreg), ids, n); }
 

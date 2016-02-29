@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -180,23 +180,23 @@ ofono_modem_set_online_full(
 
 /* Inline wrappers */
 
-G_INLINE_FUNC OfonoObject*
+OFONO_INLINE OfonoObject*
 ofono_modem_object(OfonoModem* modem)
     { return G_LIKELY(modem) ? &modem->object : NULL; }
 
-G_INLINE_FUNC const char*
+OFONO_INLINE const char*
 ofono_modem_path(OfonoModem* modem)
     { return G_LIKELY(modem) ? modem->object.path : NULL; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_modem_valid(OfonoModem* modem)
     { return G_LIKELY(modem) && modem->object.valid; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_modem_wait_valid(OfonoModem* modem, int msec, GError** error)
     { return ofono_object_wait_valid(ofono_modem_object(modem), msec, error); }
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_modem_remove_handlers(OfonoModem* modem, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_modem_object(modem), ids, n); }
 

@@ -132,23 +132,23 @@ ofono_simmgr_remove_handler(
 
 /* Inline wrappers */
 
-G_INLINE_FUNC OfonoObject*
+OFONO_INLINE OfonoObject*
 ofono_simmgr_object(OfonoSimMgr* sim)
     { return G_LIKELY(sim) ? &sim->intf.object : NULL; }
 
-G_INLINE_FUNC const char*
+OFONO_INLINE const char*
 ofono_simmgr_path(OfonoSimMgr* sim)
     { return G_LIKELY(sim) ? sim->intf.object.path : NULL; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_simmgr_valid(OfonoSimMgr* sim)
     { return G_LIKELY(sim) && sim->intf.object.valid; }
 
-G_INLINE_FUNC gboolean
+OFONO_INLINE gboolean
 ofono_simmgr_wait_valid(OfonoSimMgr* sim, int msec, GError** error)
     { return ofono_object_wait_valid(ofono_simmgr_object(sim), msec, error); }
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_simmgr_remove_handlers(OfonoSimMgr* sim, gulong* ids, guint n)
     { ofono_object_remove_handlers(ofono_simmgr_object(sim), ids, n); }
 

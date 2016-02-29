@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -254,7 +254,7 @@ ofono_object_property_string_reset(
     OfonoObject* self,
     const OfonoObjectProperty* prop);
 
-G_INLINE_FUNC void
+OFONO_INLINE void
 ofono_object_emit_property_changed_signal(OfonoObject* object,
     const OfonoObjectProperty* property)
     { if (property->signal) g_signal_emit(object, property->signal, 0); }

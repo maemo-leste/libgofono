@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -57,6 +57,8 @@ typedef enum ofono_connctx_type {
 } OFONO_CONNCTX_TYPE;
 
 extern GLogModule OFONO_LOG_MODULE;
+
+#define OFONO_INLINE static inline
 
 G_END_DECLS
 
