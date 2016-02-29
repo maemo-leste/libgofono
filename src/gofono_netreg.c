@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -67,13 +67,14 @@ static const OfonoNameIntPair ofono_netreg_status_values[] = {
     { "registered",   OFONO_NETREG_STATUS_REGISTERED },
     { "searching",    OFONO_NETREG_STATUS_SEARCHING },
     { "denied",       OFONO_NETREG_STATUS_DENIED },
+    { "unknown",      OFONO_NETREG_STATUS_UNKNOWN },
     { "roaming",      OFONO_NETREG_STATUS_ROAMING }
 };
 
 static const OfonoNameIntMap ofono_netreg_status_map = {
     "registration status",
     OFONO_NAME_INT_MAP_ENTRIES(ofono_netreg_status_values),
-    { NULL,  }
+    { NULL, OFONO_NETREG_STATUS_UNKNOWN }
 };
 
 static const OfonoNameIntPair ofono_netreg_mode_values[] = {
