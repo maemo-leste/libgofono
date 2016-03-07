@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -31,6 +31,7 @@
  */
 
 #include "gofono_connctx_p.h"
+#include "gofono_error.h"
 #include "gofono_names.h"
 #include "gofono_util.h"
 #include "gofono_log.h"
@@ -40,6 +41,10 @@
 #define OFONO_OBJECT_PROXY OrgOfonoConnectionContext
 #include "org.ofono.ConnectionContext.h"
 #include "gofono_object_p.h"
+
+/* Retry configuration */
+#define RETRY_DELAY_SEC (1)
+#define MAX_RETRY_COUNT (30)
 
 /* Object definition */
 typedef struct ofono_connctx_settings_priv {
@@ -58,8 +63,10 @@ typedef enum connctx_action {
 } CONNCTX_ACTION;
 
 struct ofono_connctx_priv {
-    GCancellable* pending_action;
     CONNCTX_ACTION next_action;
+    CONNCTX_ACTION current_action;
+    guint retry_id;
+    guint retry_count;
     char* apn;
     char* name;
     char* username;
@@ -160,6 +167,11 @@ static
 void
 ofono_connctx_perform_next_action(
     OfonoConnCtx* self);
+
+static
+gboolean
+ofono_connctx_set_active_retry(
+    gpointer user_data);
 
 /*==========================================================================*
  * Implementation
@@ -276,15 +288,54 @@ void
 ofono_connctx_set_active_done(
     OfonoObject* object,
     const GError* error,
-    void* arg /* on/off */)
+    void* arg)
 {
     OfonoConnCtx* self = OFONO_CONNCTX(object);
-    self->priv->pending_action = NULL;
-    if (error && GPOINTER_TO_INT(arg)) {
-        g_signal_emit(self, ofono_connctx_signals[
-            CONNCTX_SIGNAL_ACTIVATE_FAILED], 0, error);
+    OfonoConnCtxPriv* priv = self->priv;
+    GASSERT(!priv->retry_id);
+    GASSERT(priv->current_action != CONNCTX_ACTION_NONE);
+    if (error) {
+        if (error->domain == OFONO_ERROR &&
+            error->code == OFONO_ERROR_BUSY &&
+            priv->retry_count < MAX_RETRY_COUNT) {
+            priv->retry_count++;
+            GDEBUG("Retry %d in %d sec", priv->retry_count, RETRY_DELAY_SEC);
+            priv->retry_id = g_timeout_add_seconds(RETRY_DELAY_SEC,
+                ofono_connctx_set_active_retry, self);
+        } else {
+            GDEBUG("Giving up on %s", ofono_connctx_path(self));
+            if (priv->current_action == CONNCTX_ACTION_ACTIVATE) {
+                priv->current_action = CONNCTX_ACTION_NONE;
+                /* Need to reset current_action before emitting the signal */
+                g_signal_emit(self, ofono_connctx_signals[
+                    CONNCTX_SIGNAL_ACTIVATE_FAILED], 0, error);
+            } else {
+                priv->current_action = CONNCTX_ACTION_NONE;
+            }
+        }
+    } else {
+        /* Success */
+        priv->current_action = CONNCTX_ACTION_NONE;
     }
     ofono_connctx_perform_next_action(self);
+}
+
+static
+gboolean
+ofono_connctx_set_active_retry(
+    gpointer user_data)
+{
+    OfonoConnCtx* self = OFONO_CONNCTX(user_data);
+    OfonoConnCtxPriv* priv = self->priv;
+    const gboolean on = (priv->current_action == CONNCTX_ACTION_ACTIVATE);
+    GASSERT(priv->current_action != CONNCTX_ACTION_NONE);
+    GASSERT(priv->retry_id);
+    priv->retry_id = 0;
+    GDEBUG("%sctivating %s again", on ? "A" : "Dea", ofono_connctx_path(self));
+    ofono_object_set_boolean(ofono_connctx_object(self),
+        OFONO_CONNCTX_PROPERTY_ACTIVE, on, ofono_connctx_set_active_done,
+        NULL);
+    return G_SOURCE_REMOVE;
 }
 
 static
@@ -294,14 +345,27 @@ ofono_connctx_perform_next_action(
 {
     OfonoObject* object = ofono_connctx_object(self);
     OfonoConnCtxPriv* priv = self->priv;
-    if (object->valid && !priv->pending_action &&
-        priv->next_action != CONNCTX_ACTION_NONE) {
-        const gboolean on = (priv->next_action == CONNCTX_ACTION_ACTIVATE);
-        GDEBUG("%sctivating %s", on ? "A" : "Dea", object->path);
-        priv->pending_action = ofono_object_set_boolean(object,
-            OFONO_CONNCTX_PROPERTY_ACTIVE, on, ofono_connctx_set_active_done,
-            GINT_TO_POINTER(on));
-        priv->next_action = CONNCTX_ACTION_NONE;
+    if (object->valid) {
+        if (priv->current_action != CONNCTX_ACTION_NONE &&
+            priv->next_action != CONNCTX_ACTION_NONE &&
+            priv->next_action != priv->current_action &&
+            priv->retry_id) {
+            /* Cancel retry, start the next action */
+            priv->current_action = CONNCTX_ACTION_NONE;
+            g_source_remove(priv->retry_id);
+            priv->retry_id = 0;
+        }
+        if (priv->current_action == CONNCTX_ACTION_NONE &&
+            priv->next_action != CONNCTX_ACTION_NONE) {
+            const gboolean on = (priv->next_action == CONNCTX_ACTION_ACTIVATE);
+            GASSERT(!priv->retry_id);
+            priv->retry_count = 0;
+            GDEBUG("%sctivating %s", on ? "A" : "Dea", object->path);
+            ofono_object_set_boolean(object, OFONO_CONNCTX_PROPERTY_ACTIVE, on,
+                ofono_connctx_set_active_done, self);
+            priv->current_action = priv->next_action;
+            priv->next_action = CONNCTX_ACTION_NONE;
+        }
     }
 }
 
@@ -546,24 +610,36 @@ ofono_connctx_remove_handler(
     }
 }
 
+static
+void
+ofono_connctx_perform_action(
+    OfonoConnCtx* self,
+    CONNCTX_ACTION action)
+{
+    if (G_LIKELY(self)) {
+        OfonoConnCtxPriv* priv = self->priv;
+        if (priv->current_action != action) {
+            priv->next_action = action;
+            ofono_connctx_perform_next_action(self);
+        } else {
+            /* It's already being performed */
+            priv->next_action = CONNCTX_ACTION_NONE;
+        }
+    }
+}
+
 void
 ofono_connctx_activate(
     OfonoConnCtx* self)
 {
-    if (G_LIKELY(self)) {
-        self->priv->next_action = CONNCTX_ACTION_ACTIVATE;
-        ofono_connctx_perform_next_action(self);
-    }
+    ofono_connctx_perform_action(self, CONNCTX_ACTION_ACTIVATE);
 }
 
 void
 ofono_connctx_deactivate(
     OfonoConnCtx* self)
 {
-    if (G_LIKELY(self)) {
-        self->priv->next_action = CONNCTX_ACTION_DEACTIVATE;
-        ofono_connctx_perform_next_action(self);
-    }
+    ofono_connctx_perform_action(self, CONNCTX_ACTION_DEACTIVATE);
 }
 
 static
@@ -906,10 +982,14 @@ ofono_connctx_dispose(
 {
     OfonoConnCtx* self = OFONO_CONNCTX(object);
     OfonoConnCtxPriv* priv = self->priv;
+    /* OfonoObjectPendingCall maintains a reference to the ofono object while
+     * the call is pending (i.e. while current_action is being performed),
+     * meaning that we can't get here until the current action is finished. */
+    GASSERT(priv->current_action == CONNCTX_ACTION_NONE);
     priv->next_action = CONNCTX_ACTION_NONE;
-    if (priv->pending_action) {
-        g_cancellable_cancel(priv->pending_action);
-        priv->pending_action = NULL;
+    if (priv->retry_id) {
+        g_source_remove(priv->retry_id);
+        priv->retry_id = 0;
     }
     G_OBJECT_CLASS(ofono_connctx_parent_class)->dispose(object);
 }
