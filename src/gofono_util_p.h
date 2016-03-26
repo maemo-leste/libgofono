@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -35,6 +35,8 @@
 
 #include "gofono_util.h"
 
+#include <gutil_idlepool.h>
+
 typedef
 void
 (*OfonoConditionHandler)(
@@ -67,6 +69,9 @@ ofono_condition_wait(
     OfonoWaitConditionRemoveHandler remove_handler,
     int timeout_msec,
     GError** error);
+
+GUtilIdlePool*
+ofono_idle_pool(void);
 
 GPtrArray*
 ofono_string_array_from_variant(

@@ -30,16 +30,20 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "gofono_connctx_p.h"
+#include "gofono_connctx.h"
+#include "gofono_modem.h"
 #include "gofono_error.h"
 #include "gofono_names.h"
 #include "gofono_util.h"
 #include "gofono_log.h"
-#include "gutil_strv.h"
+
+#include <gutil_strv.h>
+#include <gutil_misc.h>
 
 /* Generated headers */
 #define OFONO_OBJECT_PROXY OrgOfonoConnectionContext
 #include "org.ofono.ConnectionContext.h"
+#include "org.ofono.ConnectionManager.h"
 #include "gofono_object_p.h"
 
 /* Retry configuration */
@@ -55,6 +59,18 @@ typedef struct ofono_connctx_settings_priv {
     char* gateway;
     char** dns;
 } OfonoConnCtxSettingsPriv;
+
+enum modem_event {
+    MODEM_EVENT_VALID,
+    MODEM_EVENT_INTERFACES,
+    MODEM_EVENT_COUNT
+};
+
+enum connmgr_event {
+    CONNMGR_EVENT_CONTEXT_ADDED,
+    CONNMGR_EVENT_CONTEXT_REMOVED,
+    CONNMGR_EVENT_COUNT
+};
 
 typedef enum connctx_action {
     CONNCTX_ACTION_NONE,
@@ -75,10 +91,16 @@ struct ofono_connctx_priv {
     char* mms_center;
     OfonoConnCtxSettingsPriv settings;
     OfonoConnCtxSettingsPriv ipv6_settings;
+    OfonoModem* modem;
+    gulong modem_event_id[MODEM_EVENT_COUNT];
+    OrgOfonoConnectionManager* connmgr;
+    gulong connmgr_event_id[CONNMGR_EVENT_COUNT];
+    gboolean removed;
 };
 
 typedef OfonoObjectClass OfonoConnCtxClass;
 G_DEFINE_TYPE(OfonoConnCtx, ofono_connctx, OFONO_TYPE_OBJECT)
+#define SUPER_CLASS ofono_connctx_parent_class
 
 enum ofono_connctx_signal {
     CONNCTX_SIGNAL_ACTIVATE_FAILED,
@@ -176,6 +198,14 @@ ofono_connctx_set_active_retry(
 /*==========================================================================*
  * Implementation
  *==========================================================================*/
+
+OFONO_INLINE
+void
+ofono_connctx_update_ready(
+    OfonoConnCtx* self)
+{
+    ofono_object_update_ready(ofono_connctx_object(self));
+}
 
 static
 void
@@ -369,9 +399,80 @@ ofono_connctx_perform_next_action(
     }
 }
 
-/*==========================================================================*
- * API
- *==========================================================================*/
+static
+void
+ofono_connctx_modem_changed(
+    OfonoModem* modem,
+    void* arg)
+{
+    ofono_connctx_update_ready(OFONO_CONNCTX(arg));
+}
+
+static
+void
+ofono_connctx_added(
+    OrgOfonoConnectionManager* proxy,
+    const char* path,
+    GVariant* properties,
+    OfonoConnCtx* self)
+{
+    if (!g_strcmp0(path, ofono_connctx_path(self))) {
+        OfonoConnCtxPriv* priv = self->priv;
+        GVERBOSE_("%s added", path);
+        if (!priv->removed) {
+            /*
+             * If priv->removed is TRUE, then this object is already
+             * invalid; otherwise we need to make is invalid to ensure
+             * that setup gets repeated.
+             */
+            priv->removed = TRUE;
+            ofono_connctx_update_ready(self);
+        }
+        priv->removed = FALSE;
+        ofono_connctx_update_ready(self);
+    }
+}
+
+static
+void
+ofono_connctx_removed(
+    OrgOfonoConnectionManager* proxy,
+    const char* path,
+    OfonoConnCtx* self)
+{
+    if (!g_strcmp0(path, ofono_connctx_path(self))) {
+        OfonoConnCtxPriv* priv = self->priv;
+        GVERBOSE_("%s removed", path);
+        priv->removed = TRUE;
+        ofono_connctx_update_ready(self);
+    }
+}
+
+static
+void
+ofono_connctx_connection_manager_proxy_created(
+    GObject* source,
+    GAsyncResult* res,
+    gpointer data)
+{
+    OfonoConnCtx* self = OFONO_CONNCTX(data);
+    OfonoConnCtxPriv* priv = self->priv;
+    GError* err = NULL;
+    priv->connmgr = org_ofono_connection_manager_proxy_new_finish(res, &err);
+    if (priv->connmgr) {
+        priv->connmgr_event_id[CONNMGR_EVENT_CONTEXT_ADDED] =
+            g_signal_connect(priv->connmgr, "context-added",
+            G_CALLBACK(ofono_connctx_added), self);
+        priv->connmgr_event_id[CONNMGR_EVENT_CONTEXT_REMOVED] =
+            g_signal_connect(priv->connmgr, "context-removed",
+            G_CALLBACK(ofono_connctx_removed), self);
+        ofono_connctx_update_ready(self);
+    } else {
+        GERR("%s", GERRMSG(err));
+    }
+    if (err) g_error_free(err);
+    ofono_connctx_unref(self);
+}
 
 static
 void
@@ -391,42 +492,65 @@ ofono_connctx_destroyed(
     }
 }
 
+static
 OfonoConnCtx*
-ofono_connctx_new_internal(
-    const char* path,
-    GVariant* properties)
+ofono_connctx_create(
+    const char* path)
+{
+    OfonoConnCtx* self = g_object_new(OFONO_TYPE_CONNCTX, NULL);
+    OfonoObject* object = ofono_connctx_object(self);
+    const char* sep = NULL;
+    ofono_object_initialize(object, OFONO_CONNCTX_INTERFACE_NAME, path);
+    if (path && path[0] == '/') sep = strchr(path + 1, '/');
+    if (sep) {
+        OfonoConnCtxPriv* priv = self->priv;
+        char* modem_path = strndup(path, sep - path);
+
+        /* Initialize modem */
+        priv->modem = ofono_modem_new(modem_path);
+        priv->modem_event_id[MODEM_EVENT_VALID] =
+            ofono_modem_add_valid_changed_handler(priv->modem,
+                ofono_connctx_modem_changed, self);
+        priv->modem_event_id[MODEM_EVENT_INTERFACES] =
+            ofono_modem_add_interfaces_changed_handler(priv->modem,
+                ofono_connctx_modem_changed, self);
+
+        /* Initialize ConnectionManager proxy */
+        org_ofono_connection_manager_proxy_new(ofono_object_bus(object),
+            G_DBUS_PROXY_FLAGS_NONE, OFONO_SERVICE, modem_path, NULL,
+            ofono_connctx_connection_manager_proxy_created,
+            ofono_connctx_ref(self));
+
+        g_free(modem_path);
+    }
+    ofono_connctx_update_ready(self);
+    return self;
+}
+
+/*==========================================================================*
+ * API
+ *==========================================================================*/
+
+OfonoConnCtx*
+ofono_connctx_new(
+    const char* path)
 {
     OfonoConnCtx* context = NULL;
     if (path && ofono_connctx_table) {
         context = ofono_connctx_ref(g_hash_table_lookup(
             ofono_connctx_table, path));
     }
-    if (!context) {
-        OfonoObject* object;
+    if (!context && path) {
         char* key = g_strdup(path);
-        context = g_object_new(OFONO_TYPE_CONNCTX, NULL);
-        object = &context->object;
-        ofono_object_initialize(object, OFONO_CONNCTX_INTERFACE_NAME, path);
-
+        context = ofono_connctx_create(path);
         if (!ofono_connctx_table) {
             ofono_connctx_table = g_hash_table_new_full(g_str_hash,
                 g_str_equal, g_free, NULL);
         }
         g_hash_table_replace(ofono_connctx_table, key, context);
         g_object_weak_ref(G_OBJECT(context), ofono_connctx_destroyed, key);
-
-        if (properties) {
-            ofono_object_apply_properties(object, properties);
-        }
     }
     return context;
-}
-
-OfonoConnCtx*
-ofono_connctx_new(
-    const char* path)
-{
-    return ofono_connctx_new_internal(path, NULL);
 }
 
 OfonoConnCtx*
@@ -948,13 +1072,41 @@ ofono_connctx_property_settings_apply(
  *==========================================================================*/
 
 static
+gboolean
+ofono_connctx_is_present(
+    OfonoConnCtx* self)
+{
+    OfonoConnCtxPriv* priv = self->priv;
+    return priv->connmgr && ofono_modem_valid(priv->modem) && !priv->removed &&
+        ofono_modem_has_interface(priv->modem, OFONO_CONNMGR_INTERFACE_NAME);
+}
+
+static
+gboolean
+ofono_connctx_is_ready(
+    OfonoObject* object)
+{
+    return ofono_connctx_is_present(OFONO_CONNCTX(object)) &&
+        OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_is_ready(object);
+}
+
+static
+gboolean
+ofono_connctx_is_valid(
+    OfonoObject* object)
+{
+    return ofono_connctx_is_present(OFONO_CONNCTX(object)) &&
+        OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_is_valid(object);
+}
+
+static
 void
 ofono_connctx_valid_changed(
     OfonoObject* object)
 {
     OfonoConnCtx* self = OFONO_CONNCTX(object);
     if (object->valid) ofono_connctx_perform_next_action(self);
-    OFONO_OBJECT_CLASS(ofono_connctx_parent_class)->fn_valid_changed(object);
+    OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_valid_changed(object);
 }
 
 /**
@@ -991,7 +1143,11 @@ ofono_connctx_dispose(
         g_source_remove(priv->retry_id);
         priv->retry_id = 0;
     }
-    G_OBJECT_CLASS(ofono_connctx_parent_class)->dispose(object);
+    gutil_disconnect_handlers(priv->connmgr, priv->connmgr_event_id,
+        G_N_ELEMENTS(priv->connmgr_event_id));
+    ofono_modem_remove_handlers(priv->modem, priv->modem_event_id,
+        G_N_ELEMENTS(priv->modem_event_id));
+    G_OBJECT_CLASS(SUPER_CLASS)->dispose(object);
 }
 
 /**
@@ -1010,9 +1166,11 @@ ofono_connctx_finalize(
     g_free(priv->password);
     g_free(priv->mms_proxy);
     g_free(priv->mms_center);
+    ofono_modem_unref(priv->modem);
     ofono_connctx_settings_clear(&priv->settings);
     ofono_connctx_settings_clear(&priv->ipv6_settings);
-    G_OBJECT_CLASS(ofono_connctx_parent_class)->finalize(object);
+    if (priv->connmgr) g_object_unref(priv->connmgr);
+    G_OBJECT_CLASS(SUPER_CLASS)->finalize(object);
 }
 
 /**
@@ -1063,6 +1221,8 @@ ofono_connctx_class_init(
     GObjectClass* object_class = G_OBJECT_CLASS(klass);
     klass->properties = ofono_connctx_properties;
     klass->nproperties = G_N_ELEMENTS(ofono_connctx_properties);
+    klass->fn_is_ready = ofono_connctx_is_ready;
+    klass->fn_is_valid = ofono_connctx_is_valid;
     klass->fn_valid_changed = ofono_connctx_valid_changed;
     object_class->dispose = ofono_connctx_dispose;
     object_class->finalize = ofono_connctx_finalize;

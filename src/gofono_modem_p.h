@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -35,11 +35,6 @@
 
 #include "gofono_modem.h"
 #include "gofono_modemintf.h"
-
-OfonoModem*
-ofono_modem_added(
-    const char* path,
-    GVariant* properties);
 
 OfonoModemInterface*
 ofono_modem_get_interface(

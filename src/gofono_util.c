@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -39,6 +39,35 @@ typedef struct ofono_condition_wait_data {
     guint timeout_id;
     OfonoConditionCheck check;
 } OfonoConditionWaitData;
+
+static GUtilIdlePool* ofono_shared_pool = NULL;
+
+GUtilIdlePool*
+ofono_idle_pool()
+{
+    if (!ofono_shared_pool) {
+        ofono_shared_pool = gutil_idle_pool_new();
+        g_object_add_weak_pointer(G_OBJECT(ofono_shared_pool),
+            (gpointer*)&ofono_shared_pool);
+        /*
+         * Add ofono_shared_pool itself to the pool, so that if
+         * the caller doesn't reference it, the pool will end up
+         * destroying itself.
+         */
+        gutil_idle_pool_add_object(ofono_shared_pool, ofono_shared_pool);
+    }
+    return ofono_shared_pool;
+}
+
+void
+ofono_idle_pool_drain()
+{
+    if (ofono_shared_pool) {
+        gutil_idle_pool_ref(ofono_shared_pool);
+        gutil_idle_pool_drain(ofono_shared_pool);
+        gutil_idle_pool_unref(ofono_shared_pool);
+    }
+}
 
 static
 gboolean

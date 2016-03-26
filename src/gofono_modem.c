@@ -32,10 +32,11 @@
 
 #include "gofono_modem_p.h"
 #include "gofono_modemintf.h"
-#include "gofono_manager.h"
+#include "gofono_manager_proxy.h"
 #include "gofono_names.h"
-#include "gofono_util.h"
 #include "gofono_log.h"
+
+#include <gutil_misc.h>
 
 /* Generated headers */
 #define OFONO_OBJECT_PROXY OrgOfonoModem
@@ -45,6 +46,7 @@
 /* Object definition */
 enum modem_handler_id {
     MANAGER_HANDLER_VALID_CHANGED,
+    MANAGER_HANDLER_MODEM_ADDED,
     MANAGER_HANDLER_MODEM_REMOVED,
     MANAGER_HANDLER_COUNT
 };
@@ -58,12 +60,13 @@ struct ofono_modem_priv {
     char* serial;
     char* type;
     GHashTable* intf_objects;
-    OfonoManager* manager;
+    OfonoManagerProxy* manager;
     gulong manager_handler_id[MANAGER_HANDLER_COUNT];
 };
 
 typedef OfonoObjectClass OfonoModemClass;
 G_DEFINE_TYPE(OfonoModem, ofono_modem, OFONO_TYPE_OBJECT)
+#define SUPER_CLASS ofono_modem_parent_class
 
 #define MODEM_SIGNAL_POWERED_CHANGED_NAME       "powered-changed"
 #define MODEM_SIGNAL_ONLINE_CHANGED_NAME        "online-changed"
@@ -84,17 +87,13 @@ static GHashTable* ofono_modem_table = NULL;
  * Implementation
  *==========================================================================*/
 
-#if GUTIL_LOG_DEBUG
-static
-gboolean
-ofono_modem_initialized(
-    OfonoObject* object)
+OFONO_INLINE
+void
+ofono_modem_update_ready(
+    OfonoModem* self)
 {
-    OfonoModem* self = OFONO_MODEM(object);
-    GDEBUG("%s: Modem %sline", self->priv->id, self->online ? "on" : "off");
-    return OFONO_OBJECT_CLASS(ofono_modem_parent_class)->fn_initialized(object);
+    ofono_object_update_ready(ofono_modem_object(self));
 }
-#endif /* GUTIL_LOG_DEBUG */
 
 static
 void
@@ -136,62 +135,36 @@ ofono_modem_destroyed(
 }
 
 static
-OfonoModem*
-ofono_modem_create(
+void
+ofono_modem_added(
+    OfonoManagerProxy* manager,
     const char* path,
-    GVariant* properties)
+    void* arg)
 {
-    OfonoModem* modem = (path && ofono_modem_table) ?
-        ofono_modem_ref(g_hash_table_lookup(ofono_modem_table, path)) : NULL;
-    if (!modem) {
-        OfonoObject* object;
-        OfonoModemPriv* priv;
-        char* key = g_strdup(path);
-        modem = g_object_new(OFONO_TYPE_MODEM, NULL);
-        priv = modem->priv;
-        object = &modem->object;
-
-        ofono_object_initialize(object, OFONO_MODEM_INTERFACE_NAME, path);
-        priv->id = ofono_object_name(object);
-        if (!ofono_modem_table) {
-            ofono_modem_table = g_hash_table_new_full(g_str_hash,
-                g_str_equal, g_free, NULL);
-        }
-        g_hash_table_replace(ofono_modem_table, key, modem);
-        g_object_weak_ref(G_OBJECT(modem), ofono_modem_destroyed, key);
-        ofono_object_set_invalid(&modem->object, !priv->manager->valid ||
-            !ofono_manager_has_modem(priv->manager, path));
-        GDEBUG("Modem '%s'", path);
-    }
-    if (properties) ofono_object_apply_properties(&modem->object, properties);
-    return modem;
+    ofono_modem_update_ready(OFONO_MODEM(arg));
 }
 
 static
 void
 ofono_modem_removed(
-    OfonoManager* manager,
+    OfonoManagerProxy* manager,
     const char* path,
     void* arg)
 {
-    OfonoModem* modem = arg;
-    GASSERT(modem->priv->manager == manager);
-    if (!g_strcmp0(path, modem->object.path)) {
+    OfonoModem* self = OFONO_MODEM(arg);
+    if (!g_strcmp0(path, ofono_modem_path(self))) {
         GDEBUG("Modem '%s' is gone", path);
-        ofono_object_set_invalid(&modem->object, TRUE);
+        ofono_modem_update_ready(self);
     }
 }
 
 static
 void
-ofono_modem_manager_valid_changed(
-    OfonoManager* manager,
+ofono_modem_manager_proxy_valid_changed(
+    OfonoManagerProxy* manager,
     void* arg)
 {
-    OfonoModem* modem = arg;
-    GASSERT(modem->priv->manager == manager);
-    ofono_object_set_invalid(&modem->object, !manager->valid ||
-        !ofono_manager_has_modem(manager, modem->object.path));
+    ofono_modem_update_ready(OFONO_MODEM(arg));
 }
 
 OFONO_INLINE
@@ -236,15 +209,28 @@ OfonoModem*
 ofono_modem_new(
     const char* path)
 {
-    return ofono_modem_create(path, NULL);
-}
+    OfonoModem* modem = (path && ofono_modem_table) ?
+        ofono_modem_ref(g_hash_table_lookup(ofono_modem_table, path)) : NULL;
+    if (!modem) {
+        OfonoObject* object;
+        OfonoModemPriv* priv;
+        char* key = g_strdup(path);
+        modem = g_object_new(OFONO_TYPE_MODEM, NULL);
+        priv = modem->priv;
+        object = &modem->object;
 
-OfonoModem*
-ofono_modem_added(
-    const char* path,
-    GVariant* properties)
-{
-    return ofono_modem_create(path, properties);
+        ofono_object_initialize(object, OFONO_MODEM_INTERFACE_NAME, path);
+        priv->id = ofono_object_name(object);
+        if (!ofono_modem_table) {
+            ofono_modem_table = g_hash_table_new_full(g_str_hash,
+                g_str_equal, g_free, NULL);
+        }
+        g_hash_table_replace(ofono_modem_table, key, modem);
+        g_object_weak_ref(G_OBJECT(modem), ofono_modem_destroyed, key);
+        ofono_modem_update_ready(modem);
+        GDEBUG("Modem '%s'", path);
+    }
+    return modem;
 }
 
 gboolean
@@ -458,6 +444,34 @@ ofono_modem_property_priv(
  * Internals
  *==========================================================================*/
 
+static
+gboolean
+ofono_modem_is_present(
+    OfonoModem* self)
+{
+    OfonoManagerProxy* manager = self->priv->manager;
+    return manager->valid &&
+        ofono_manager_proxy_has_modem(manager, ofono_modem_path(self));
+}
+
+static
+gboolean
+ofono_modem_is_ready(
+    OfonoObject* object)
+{
+    return ofono_modem_is_present(OFONO_MODEM(object)) &&
+        OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_is_ready(object);
+}
+
+static
+gboolean
+ofono_modem_is_valid(
+    OfonoObject* object)
+{
+    return ofono_modem_is_present(OFONO_MODEM(object)) &&
+        OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_is_valid(object);
+}
+
 /**
  * Per instance initializer
  */
@@ -469,12 +483,15 @@ ofono_modem_init(
     OfonoModemPriv* priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_MODEM, OfonoModemPriv);
     self->priv = priv;
-    priv->manager = ofono_manager_new();
+    priv->manager = ofono_manager_proxy_new();
     priv->manager_handler_id[MANAGER_HANDLER_VALID_CHANGED] =
-        ofono_manager_add_valid_changed_handler(priv->manager,
-            ofono_modem_manager_valid_changed, self);
+        ofono_manager_proxy_add_valid_changed_handler(priv->manager,
+            ofono_modem_manager_proxy_valid_changed, self);
+    priv->manager_handler_id[MANAGER_HANDLER_MODEM_ADDED] =
+        ofono_manager_proxy_add_modem_added_handler(priv->manager,
+            ofono_modem_added, self);
     priv->manager_handler_id[MANAGER_HANDLER_MODEM_REMOVED] =
-        ofono_manager_add_modem_removed_handler(priv->manager,
+        ofono_manager_proxy_add_modem_removed_handler(priv->manager,
             ofono_modem_removed, self);
 }
 
@@ -488,12 +505,9 @@ ofono_modem_finalize(
 {
     OfonoModem* self = OFONO_MODEM(object);
     OfonoModemPriv* priv = self->priv;
-    unsigned int i;
-    for (i=0; i<G_N_ELEMENTS(priv->manager_handler_id); i++) {
-        ofono_manager_remove_handler(priv->manager,
-            priv->manager_handler_id[i]);
-    }
-    ofono_manager_unref(priv->manager);
+    gutil_disconnect_handlers(priv->manager, priv->manager_handler_id,
+        G_N_ELEMENTS(priv->manager_handler_id));
+    g_object_unref(priv->manager);
     if (priv->intf_objects) {
         GHashTableIter it;
         gpointer key, value;
@@ -513,7 +527,7 @@ ofono_modem_finalize(
     g_free(priv->type);
     if (self->features) g_ptr_array_unref(self->features);
     if (self->interfaces) g_ptr_array_unref(self->interfaces);
-    G_OBJECT_CLASS(ofono_modem_parent_class)->finalize(object);
+    G_OBJECT_CLASS(SUPER_CLASS)->finalize(object);
 }
 
 /**
@@ -539,14 +553,13 @@ ofono_modem_class_init(
         MODEM_DEFINE_PROPERTY_STRING_ARRAY(INTERFACES,interfaces)
     };
 
+    klass->fn_is_ready = ofono_modem_is_ready;
+    klass->fn_is_valid = ofono_modem_is_valid;
     klass->properties = ofono_modem_properties;
     klass->nproperties = G_N_ELEMENTS(ofono_modem_properties);
     G_OBJECT_CLASS(klass)->finalize = ofono_modem_finalize;
     g_type_class_add_private(klass, sizeof(OfonoModemPriv));
     OFONO_OBJECT_CLASS_SET_PROXY_CALLBACKS(klass, org_ofono_modem);
-#if GUTIL_LOG_DEBUG
-    klass->fn_initialized = ofono_modem_initialized;
-#endif /* GUTIL_LOG_DEBUG */
     ofono_class_initialize(klass);
 }
 

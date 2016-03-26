@@ -43,6 +43,7 @@ SRC = \
   gofono_country.c \
   gofono_error.c \
   gofono_manager.c \
+  gofono_manager_proxy.c \
   gofono_modem.c \
   gofono_modemintf.c \
   gofono_netreg.c \

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -32,9 +32,11 @@
 
 #include "gofono_modem.h"
 #include "gofono_connmgr.h"
+#include "gofono_connctx.h"
 #include "gofono_simmgr.h"
 #include "gofono_netreg.h"
 #include "gofono_names.h"
+#include "gofono_util.h"
 
 #include <glib-unix.h>
 #include <gutil_log.h>
@@ -53,8 +55,7 @@ typedef struct app {
 
 static
 void
-object_dump_property_value(
-    OfonoObject* object,
+object_dump_property(
     const char* key,
     GVariant* value)
 {
@@ -65,25 +66,26 @@ object_dump_property_value(
 
 static
 void
-object_dump_property(
-    OfonoObject* object,
-    const char* key)
-{
-    object_dump_property_value(object, key,
-        ofono_object_get_property(object, key, NULL));
-}
-
-static
-void
 object_dump_properties(
     OfonoObject* object)
 {
-    guint i;
-    GPtrArray* keys = ofono_object_get_property_keys(object);
-    for (i=0; i<keys->len; i++) {
-        object_dump_property(object, keys->pdata[i]);
+    GVariant* dict = ofono_object_get_properties(object);
+    GVariantIter iter;
+    GVariant* entry;
+    for (g_variant_iter_init(&iter, dict);
+         (entry = g_variant_iter_next_value(&iter)) != NULL;
+         g_variant_unref(entry)) {
+        GVariant* key = g_variant_get_child_value(entry, 0);
+        GVariant* value = g_variant_get_child_value(entry, 1);
+        if (g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
+            GVariant* tmp = g_variant_get_variant(value);
+            g_variant_unref(value);
+            value = tmp;
+        }
+        object_dump_property( g_variant_get_string(key, NULL), value);
+        g_variant_unref(key);
+        g_variant_unref(value);
     }
-    g_ptr_array_unref(keys);
 }
 
 static
@@ -94,7 +96,7 @@ object_property_changed_handler(
     GVariant* value,
     void* arg)
 {
-    object_dump_property_value(object, key, value);
+    object_dump_property(key, value);
 }
 
 static
@@ -162,13 +164,15 @@ object_create(
     gboolean modem_intf)
 {
     if (!strcmp(intf, OFONO_CONNMGR_INTERFACE_NAME)) {
-        return &ofono_connmgr_new(path)->intf.object;
+        return ofono_connmgr_object(ofono_connmgr_new(path));
+    } else if (!strcmp(intf, OFONO_CONNCTX_INTERFACE_NAME)) {
+        return ofono_connctx_object(ofono_connctx_new(path));
     } else if (!strcmp(intf, OFONO_SIMMGR_INTERFACE_NAME)) {
-        return &ofono_simmgr_new(path)->intf.object;
+        return ofono_simmgr_object(ofono_simmgr_new(path));
     } else if (!strcmp(intf, OFONO_NETREG_INTERFACE_NAME)) {
-        return &ofono_netreg_new(path)->intf.object;
+        return ofono_netreg_object(ofono_netreg_new(path));
     } else if (!strcmp(intf, OFONO_MODEM_INTERFACE_NAME)) {
-        return &ofono_modem_new(path)->object;
+        return ofono_modem_object(ofono_modem_new(path));
     } else if (modem_intf) {
         return &ofono_modem_interface_new(intf, path)->object;
     } else {

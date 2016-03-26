@@ -59,11 +59,17 @@ typedef struct ofono_object_class {
     GObjectClass object;
     OfonoObjectProperty* properties;
     guint nproperties;
-    gboolean (*fn_initialized)(
+    void (*fn_proxy_created)(
+        OfonoObject* object,
+        OFONO_OBJECT_PROXY* proxy);
+    gboolean (*fn_is_ready)(
+        OfonoObject* object);
+    void (*fn_ready_changed)(
+        OfonoObject* object,
+        gboolean ready);
+    gboolean (*fn_is_valid)(
         OfonoObject* object);
     void (*fn_valid_changed)(
-        OfonoObject* object);
-    void (*fn_invalidate)(
         OfonoObject* object);
     /* Functions below point to generated stubs */
     void (*fn_proxy_new)(
@@ -151,13 +157,16 @@ ofono_object_apply_properties(
     OfonoObject* self,
     GVariant* properties);
 
-void
-ofono_object_set_invalid(
-    OfonoObject* object,
-    gboolean invalid);
+GVariant*
+ofono_object_get_properties(
+    OfonoObject* self);
 
 void
-ofono_object_set_initialized(
+ofono_object_update_ready(
+    OfonoObject* object);
+
+void
+ofono_object_update_valid(
     OfonoObject* object);
 
 GDBusConnection*

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -65,6 +65,9 @@ const char*
 ofono_country_code(
     const char* mcc,
     const char* mnc);
+
+void
+ofono_idle_pool_drain(void);
 
 #endif /* GOFONO_UTIL_H */
 

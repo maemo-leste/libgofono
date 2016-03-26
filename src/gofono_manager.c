@@ -31,34 +31,36 @@
  */
 
 #include "gofono_manager.h"
-#include "gofono_names.h"
+#include "gofono_manager_proxy.h"
 #include "gofono_util_p.h"
-#include "gofono_object_p.h"
-#include "gofono_modem_p.h"
-#include "gofono_error.h"
+#include "gofono_modem.h"
+#include "gofono_names.h"
 #include "gofono_log.h"
 
 #include <gutil_misc.h>
-
-/* Generated headers */
-#include "org.ofono.Manager.h"
 
 /* Log module */
 GLOG_MODULE_DEFINE("ofono");
 
 /* Object definition */
 enum proxy_handler_id {
+    PROXY_HANDLER_VALID_CHANGED,
     PROXY_HANDLER_MODEM_ADDED,
     PROXY_HANDLER_MODEM_REMOVED,
     PROXY_HANDLER_COUNT
 };
+
+typedef struct ofono_manager_modem_data {
+    OfonoModem* modem;
+    gulong valid_handler_id;
+} OfonoManagerModemData;
+
 struct ofono_manager_priv {
-    GDBusConnection* bus;
-    OrgOfonoManager* proxy;
-    GCancellable* cancel;
-    guint ofono_watch_id;
+    OfonoManagerProxy* proxy;
     gulong proxy_handler_id[PROXY_HANDLER_COUNT];
-    GPtrArray* modems;
+    GUtilIdlePool* pool;
+    GHashTable* all_modems;
+    GPtrArray* valid_modems;
 };
 
 typedef GObjectClass OfonoManagerClass;
@@ -74,18 +76,26 @@ enum ofono_manager_signal {
     MANAGER_SIGNAL_COUNT
 };
 
-#define MANAGER_SIGNAL_VALID_CHANGED_NAME   "gofono-valid-changed"
-#define MANAGER_SIGNAL_MODEM_ADDED_NAME     "gofono-modem-added"
-#define MANAGER_SIGNAL_MODEM_REMOVED_NAME   "gofono-modem-removed"
+#define MANAGER_SIGNAL_VALID_CHANGED_NAME       "gofono-valid-changed"
+#define MANAGER_SIGNAL_MODEM_ADDED_NAME         "gofono-modem-added"
+#define MANAGER_SIGNAL_MODEM_REMOVED_NAME       "gofono-modem-removed"
 
 static guint ofono_manager_signals[MANAGER_SIGNAL_COUNT] = { 0 };
-
-/* Weak reference to the single instance of OfonoManager */
-static OfonoManager* ofono_manager_instance = NULL;
 
 /*==========================================================================*
  * Implementation
  *==========================================================================*/
+
+static
+void
+ofono_manager_modem_data_destroy(
+    gpointer value)
+{
+    OfonoManagerModemData* data = value;
+    ofono_modem_remove_handler(data->modem, data->valid_handler_id);
+    ofono_modem_unref(data->modem);
+    g_slice_free(OfonoManagerModemData, data);
+}
 
 static
 gint
@@ -93,20 +103,25 @@ ofono_manager_sort_modems(
     gconstpointer s1,
     gconstpointer s2)
 {
-    return strcmp(s1, s2);
+    OfonoModem* const* m1 = s1;
+    OfonoModem* const* m2 = s2;
+    return g_strcmp0(ofono_modem_path(*m1), ofono_modem_path(*m2));
 }
 
 static
 int
-ofono_manager_modem_index(
+ofono_manager_find_valid_modem(
     OfonoManager* self,
     const char* path)
 {
-    OfonoManagerPriv* priv = self->priv;
-    guint i;
-    for (i=0; i<priv->modems->len; i++) {
-        if (!strcmp(priv->modems->pdata[i], path)) {
-            return i;
+    if (path) {
+        OfonoManagerPriv* priv = self->priv;
+        GPtrArray* modems = priv->valid_modems;
+        guint i;
+        for (i=0; i<modems->len; i++) {
+            if (!g_strcmp0(ofono_modem_path(modems->pdata[i]), path)) {
+                return i;
+            }
         }
     }
     return -1;
@@ -114,84 +129,47 @@ ofono_manager_modem_index(
 
 static
 void
-ofono_manager_reset(
+ofono_manager_update_valid(
     OfonoManager* self)
 {
     OfonoManagerPriv* priv = self->priv;
-    g_ptr_array_set_size(priv->modems, 0);
-    if (priv->cancel) {
-        g_cancellable_cancel(priv->cancel);
-        g_object_unref(priv->cancel);
-        priv->cancel = NULL;
-    }
-    if (priv->proxy) {
-        int i;
-        for (i=0; i<G_N_ELEMENTS(priv->proxy_handler_id); i++) {
-            if (priv->proxy_handler_id[i]) {
-                g_signal_handler_disconnect(priv->proxy,
-                    priv->proxy_handler_id[i]);
-                priv->proxy_handler_id[i] = 0;
-            }
-        }
-        g_object_unref(priv->proxy);
-        priv->proxy = NULL;
+    gboolean valid = priv->proxy->valid &&
+        priv->valid_modems->len == g_hash_table_size(priv->all_modems);
+    if (self->valid != valid) {
+        self->valid = valid;
+        g_signal_emit(self, ofono_manager_signals[
+            MANAGER_SIGNAL_VALID_CHANGED], 0);
     }
 }
 
 static
 void
-ofono_manager_add_modem(
+ofono_manager_add_valid_modem(
     OfonoManager* self,
-    const char* path,
-    GVariant* properties)
+    OfonoModem* modem)
 {
-    OfonoManagerPriv* priv = self->priv;
-    GASSERT(path);
-    GASSERT(properties);
-    if (path && properties) {
-        GASSERT(ofono_manager_modem_index(self, path) < 0);
-        if (ofono_manager_modem_index(self, path) < 0) {
-            OfonoModem* modem = ofono_modem_added(path, properties);
-            g_ptr_array_add(priv->modems, g_strdup(path));
-            g_ptr_array_sort(priv->modems, ofono_manager_sort_modems);
-            ofono_object_set_invalid(&modem->object, !self->valid);
-            if (self->valid) {
-                g_signal_emit(self, ofono_manager_signals[
-                    MANAGER_SIGNAL_MODEM_ADDED], 0, modem);
-            }
-            ofono_modem_unref(modem);
+    GASSERT(ofono_modem_valid(modem));
+    if (!ofono_manager_has_modem(self, ofono_modem_path(modem))) {
+        OfonoManagerPriv* priv = self->priv;
+        g_ptr_array_add(priv->valid_modems, ofono_modem_ref(modem));
+        g_ptr_array_sort(priv->valid_modems, ofono_manager_sort_modems);
+        if (self->valid) {
+            g_signal_emit(self, ofono_manager_signals[
+                MANAGER_SIGNAL_MODEM_ADDED], 0, modem);
         }
     }
 }
 
 static
 void
-ofono_manager_modem_added(
-    OrgOfonoManager* proxy,
-    const char* path,
-    GVariant* properties,
-    gpointer data)
+ofono_manager_remove_valid_modem(
+    OfonoManager* self,
+    const char* path)
 {
-    OfonoManager* self = OFONO_MANAGER(data);
-    GVERBOSE_("%s", path);
-    GASSERT(proxy == self->priv->proxy);
-    ofono_manager_add_modem(self, path, properties);
-}
-
-static
-void
-ofono_manager_modem_removed(
-    OrgOfonoManager* proxy,
-    const char* path,
-    gpointer data)
-{
-    OfonoManager* self = OFONO_MANAGER(data);
-    OfonoManagerPriv* priv = self->priv;
-    const int i = ofono_manager_modem_index(self, path);
-    GVERBOSE_("%s", path);
-    GASSERT(i >= 0);
-    if (i >= 0) {
-        g_ptr_array_remove_index(priv->modems, i);
+    const int index = ofono_manager_find_valid_modem(self, path);
+    if (index >= 0) {
+        OfonoManagerPriv* priv = self->priv;
+        g_ptr_array_remove_index(priv->valid_modems, index);
         g_signal_emit(self, ofono_manager_signals[
             MANAGER_SIGNAL_MODEM_REMOVED], 0, path);
     }
@@ -199,121 +177,82 @@ ofono_manager_modem_removed(
 
 static
 void
-ofono_manager_get_modems_done(
-    GObject* proxy,
-    GAsyncResult* result,
-    gpointer data)
+ofono_manager_modem_valid_changed(
+    OfonoModem* modem,
+    void* arg)
 {
-    GError* error = NULL;
-    GVariant* modems = NULL;
-    OfonoManager* self = OFONO_MANAGER(data);
-    OfonoManagerPriv* priv = self->priv;
-
-    GASSERT(ORG_OFONO_MANAGER(proxy) == priv->proxy);
-    if (priv->cancel) {
-        g_object_unref(priv->cancel);
-        priv->cancel = NULL;
+    OfonoManager* self = OFONO_MANAGER(arg);
+    const gboolean valid = ofono_modem_valid(modem);
+    const char* path = ofono_modem_path(modem);
+    GVERBOSE_("%s %svalid", path, valid ? "" : "in");
+    if (valid) {
+        ofono_manager_add_valid_modem(self, modem);
+    } else {
+        ofono_manager_remove_valid_modem(self, path);
     }
+    ofono_manager_update_valid(self);
+}
 
-    if (org_ofono_manager_call_get_modems_finish(ORG_OFONO_MANAGER(proxy),
-        &modems, result, &error)) {
-        GVariantIter iter;
-        GVariant* child;
-        GDEBUG("%u modem(s) found", (guint)g_variant_n_children(modems));
+static
+void
+ofono_manager_add_modem(
+    OfonoManager* self,
+    const char* path)
+{
+    OfonoManagerPriv* priv = self->priv;
+    GASSERT(path);
+    if (path && path[0] == '/') {
+        OfonoModem* modem = ofono_modem_new(path);
+        OfonoManagerModemData* data = g_slice_new0(OfonoManagerModemData);
+        gpointer key = (gpointer)ofono_modem_path(modem);
 
-        for (g_variant_iter_init(&iter, modems);
-             (child = g_variant_iter_next_value(&iter)) != NULL;
-             g_variant_unref(child)) {
-            const char* path = NULL;
-            GVariant* properties = NULL;
-            g_variant_get(child, "(&o@a{sv})", &path, &properties);
-            ofono_manager_add_modem(self, path, properties);
-            g_variant_unref(properties);
+        data->modem = modem;
+        data->valid_handler_id =
+            ofono_modem_add_valid_changed_handler(modem,
+                ofono_manager_modem_valid_changed, self);
+
+        GASSERT(!g_hash_table_lookup(priv->all_modems, path));
+        g_hash_table_replace(priv->all_modems, key, data);
+
+        if (ofono_modem_valid(modem)) {
+            ofono_manager_add_valid_modem(self, modem);
         }
-        g_variant_unref(modems);
-
-        GASSERT(!self->valid);
-        self->valid = TRUE;
-        g_signal_emit(self, ofono_manager_signals[
-            MANAGER_SIGNAL_VALID_CHANGED], 0);
-    } else {
-        GERR("%s", GERRMSG(error));
-        g_error_free(error);
     }
-
-    /* Release the reference we have been holding during initialization */
-    ofono_manager_unref(self);
 }
 
 static
 void
-ofono_manager_proxy_created(
-    GObject* bus,
-    GAsyncResult* result,
+ofono_manager_proxy_valid_changed(
+    OfonoManagerProxy* proxy,
+    gpointer data)
+{
+    ofono_manager_update_valid(OFONO_MANAGER(data));
+}
+
+static
+void
+ofono_manager_modem_added(
+    OfonoManagerProxy* proxy,
+    const char* path,
+    gpointer data)
+{
+    OfonoManager* self = OFONO_MANAGER(data);
+    GVERBOSE_("%s", path);
+    ofono_manager_add_modem(self, path);
+}
+
+static
+void
+ofono_manager_modem_removed(
+    OfonoManagerProxy* proxy,
+    const char* path,
     gpointer data)
 {
     OfonoManager* self = OFONO_MANAGER(data);
     OfonoManagerPriv* priv = self->priv;
-    GError* error = NULL;
-    OrgOfonoManager* proxy = org_ofono_manager_proxy_new_finish(result, &error);
-    if (proxy) {
-        GASSERT(!priv->proxy);
-        priv->proxy = proxy;
-
-        /* Request the list of modems */
-        org_ofono_manager_call_get_modems(priv->proxy, priv->cancel,
-            ofono_manager_get_modems_done, self);
-
-        /* Subscribe for ModemAdded/Removed notifications */
-        priv->proxy_handler_id[PROXY_HANDLER_MODEM_ADDED] =
-            g_signal_connect(proxy, "modem-added",
-            G_CALLBACK(ofono_manager_modem_added), self);
-        priv->proxy_handler_id[PROXY_HANDLER_MODEM_REMOVED] =
-            g_signal_connect(proxy, "modem-removed",
-            G_CALLBACK(ofono_manager_modem_removed), self);
-    } else {
-        GERR("%s", GERRMSG(error));
-        g_error_free(error);
-        ofono_manager_unref(self);
-    }
-}
-
-static
-void
-ofono_manager_name_appeared(
-    GDBusConnection* bus,
-    const gchar* name,
-    const gchar* owner,
-    gpointer arg)
-{
-    OfonoManager* self = OFONO_MANAGER(arg);
-    OfonoManagerPriv* priv = self->priv;
-    GDEBUG("Name '%s' is owned by %s", name, owner);
-
-    /* Start the initialization sequence */
-    GASSERT(!priv->cancel);
-    GASSERT(!priv->modems->len);
-    priv->cancel = g_cancellable_new();
-    org_ofono_manager_proxy_new(bus, G_DBUS_PROXY_FLAGS_NONE,
-        OFONO_SERVICE, "/", priv->cancel, ofono_manager_proxy_created,
-        ofono_manager_ref(self));
-}
-
-static
-void
-ofono_manager_name_vanished(
-    GDBusConnection* bus,
-    const gchar* name,
-    gpointer arg)
-{
-    OfonoManager* self = OFONO_MANAGER(arg);
-    GDEBUG("Name '%s' has disappeared", name);
-    ofono_manager_reset(self);
-    if (self->valid) {
-        self->valid = FALSE;
-        g_signal_emit(self, ofono_manager_signals[
-            MANAGER_SIGNAL_VALID_CHANGED], 0);
-    }
+    GVERBOSE_("%s", path);
+    g_hash_table_remove(priv->all_modems, path);
+    ofono_manager_remove_valid_modem(self, path);
 }
 
 /*==========================================================================*
@@ -329,11 +268,21 @@ ofono_manager_create()
     if (bus) {
         OfonoManager* self = g_object_new(OFONO_TYPE_MANAGER, NULL);
         OfonoManagerPriv* priv = self->priv;
-        priv->bus = bus;
-        priv->ofono_watch_id = g_bus_watch_name_on_connection(bus,
-            OFONO_SERVICE, G_BUS_NAME_WATCHER_FLAGS_NONE,
-            ofono_manager_name_appeared, ofono_manager_name_vanished,
-            self, NULL);
+        guint i;
+        priv->proxy = ofono_manager_proxy_new();
+        priv->proxy_handler_id[PROXY_HANDLER_VALID_CHANGED] =
+            ofono_manager_proxy_add_valid_changed_handler(priv->proxy,
+                ofono_manager_proxy_valid_changed, self);
+        priv->proxy_handler_id[PROXY_HANDLER_MODEM_ADDED] =
+            ofono_manager_proxy_add_modem_added_handler(priv->proxy,
+                ofono_manager_modem_added, self);
+        priv->proxy_handler_id[PROXY_HANDLER_MODEM_REMOVED] =
+            ofono_manager_proxy_add_modem_removed_handler(priv->proxy,
+                ofono_manager_modem_removed, self);
+        for (i=0; i<priv->proxy->modem_paths->len; i++) {
+            ofono_manager_add_modem(self, priv->proxy->modem_paths->pdata[i]);
+        }
+        ofono_manager_update_valid(self);
         return self;
     } else {
         GERR("%s", GERRMSG(error));
@@ -342,29 +291,18 @@ ofono_manager_create()
     return NULL;
 }
 
-static
-void
-ofono_manager_destroyed(
-    gpointer arg,
-    GObject* object)
-{
-    GASSERT(object == (GObject*)ofono_manager_instance);
-    ofono_manager_instance = NULL;
-    GVERBOSE_("%p", object);
-}
-
 OfonoManager*
 ofono_manager_new()
 {
-    OfonoManager* manager;
+    static OfonoManager* ofono_manager_instance = NULL;
     if (ofono_manager_instance) {
-        g_object_ref(manager = ofono_manager_instance);
+        ofono_manager_ref(ofono_manager_instance);
     } else {
-        manager = ofono_manager_create();
-        ofono_manager_instance = manager;
-        g_object_weak_ref(G_OBJECT(manager), ofono_manager_destroyed, manager);
+        ofono_manager_instance = ofono_manager_create();
+        g_object_add_weak_pointer(G_OBJECT(ofono_manager_instance),
+            (gpointer*)&ofono_manager_instance);
     }
-    return manager;
+    return ofono_manager_instance;
 }
 
 OfonoManager*
@@ -388,14 +326,6 @@ ofono_manager_unref(
     }
 }
 
-static
-void
-ofono_manager_modem_list_free(
-    gpointer data)
-{
-    ofono_modem_unref(data);
-}
-
 GPtrArray*
 ofono_manager_get_modems(
     OfonoManager* self)
@@ -404,11 +334,12 @@ ofono_manager_get_modems(
     if (G_LIKELY(self)) {
         guint i;
         OfonoManagerPriv* priv = self->priv;
-        modems = g_ptr_array_new_full(priv->modems->len,
-            ofono_manager_modem_list_free);
-        for (i=0; i<priv->modems->len; i++) {
-            g_ptr_array_add(modems, ofono_modem_new(priv->modems->pdata[i]));
+        GPtrArray* list = priv->valid_modems;
+        modems = g_ptr_array_new_full(list->len, g_object_unref);
+        for (i=0; i<list->len; i++) {
+            g_ptr_array_add(modems, ofono_modem_ref(list->pdata[i]));
         }
+        gutil_idle_pool_add_ptr_array(priv->pool, modems);
     }
     return modems;
 }
@@ -418,37 +349,37 @@ ofono_manager_has_modem(
     OfonoManager* self,
     const char* path)
 {
-    return self && path && ofono_manager_modem_index(self, path) >= 0;
+    return self && ofono_manager_find_valid_modem(self, path) >= 0;
 }
 
 gulong
 ofono_manager_add_valid_changed_handler(
     OfonoManager* self,
-    OfonoManagerHandler handler,
+    OfonoManagerHandler cb,
     void* arg)
 {
-    return (G_LIKELY(self) && G_LIKELY(handler)) ? g_signal_connect(self,
-        MANAGER_SIGNAL_VALID_CHANGED_NAME, G_CALLBACK(handler), arg) : 0;
+    return (G_LIKELY(self) && G_LIKELY(cb)) ? g_signal_connect(self,
+        MANAGER_SIGNAL_VALID_CHANGED_NAME, G_CALLBACK(cb), arg) : 0;
 }
 
 gulong
 ofono_manager_add_modem_added_handler(
     OfonoManager* self,
-    OfonoManagerModemAddedHandler handler,
+    OfonoManagerModemAddedHandler cb,
     void* arg)
 {
-    return (G_LIKELY(self) && G_LIKELY(handler)) ? g_signal_connect(self,
-        MANAGER_SIGNAL_MODEM_ADDED_NAME, G_CALLBACK(handler), arg) : 0;
+    return (G_LIKELY(self) && G_LIKELY(cb)) ? g_signal_connect(self,
+        MANAGER_SIGNAL_MODEM_ADDED_NAME, G_CALLBACK(cb), arg) : 0;
 }
 
 gulong
 ofono_manager_add_modem_removed_handler(
     OfonoManager* self,
-    OfonoManagerModemRemovedHandler handler,
+    OfonoManagerModemRemovedHandler cb,
     void* arg)
 {
-    return (G_LIKELY(self) && G_LIKELY(handler)) ? g_signal_connect(self,
-        MANAGER_SIGNAL_MODEM_REMOVED_NAME, G_CALLBACK(handler), arg) : 0;
+    return (G_LIKELY(self) && G_LIKELY(cb)) ? g_signal_connect(self,
+        MANAGER_SIGNAL_MODEM_REMOVED_NAME, G_CALLBACK(cb), arg) : 0;
 }
 
 void
@@ -526,7 +457,10 @@ ofono_manager_init(
     OfonoManagerPriv* priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_MANAGER, OfonoManagerPriv);
     self->priv = priv;
-    priv->modems = g_ptr_array_new_with_free_func(g_free);
+    priv->pool = gutil_idle_pool_ref(ofono_idle_pool());
+    priv->valid_modems = g_ptr_array_new_with_free_func(g_object_unref);
+    priv->all_modems = g_hash_table_new_full(g_str_hash, g_str_equal, NULL,
+        ofono_manager_modem_data_destroy);
 }
 
 /**
@@ -540,11 +474,11 @@ ofono_manager_dispose(
 {
     OfonoManager* self = OFONO_MANAGER(object);
     OfonoManagerPriv* priv = self->priv;
-    ofono_manager_reset(self);
-    if (priv->ofono_watch_id) {
-        g_bus_unwatch_name(priv->ofono_watch_id);
-        priv->ofono_watch_id = 0;
-    }
+    self->valid = FALSE;
+    g_ptr_array_set_size(priv->valid_modems, 0);
+    g_hash_table_remove_all(priv->all_modems);
+    gutil_disconnect_handlers(priv->proxy, priv->proxy_handler_id,
+        G_N_ELEMENTS(priv->proxy_handler_id));
     G_OBJECT_CLASS(ofono_manager_parent_class)->dispose(object);
 }
 
@@ -558,8 +492,10 @@ ofono_manager_finalize(
 {
     OfonoManager* self = OFONO_MANAGER(object);
     OfonoManagerPriv* priv = self->priv;
-    g_ptr_array_unref(priv->modems);
-    g_object_unref(priv->bus);
+    gutil_idle_pool_unref(priv->pool);
+    g_ptr_array_unref(priv->valid_modems);
+    g_hash_table_destroy(priv->all_modems);
+    g_object_unref(priv->proxy);
     G_OBJECT_CLASS(ofono_manager_parent_class)->finalize(object);
 }
 
@@ -572,24 +508,22 @@ ofono_manager_class_init(
     OfonoManagerClass* klass)
 {
     GObjectClass* object_class = G_OBJECT_CLASS(klass);
+    GType class_type = G_OBJECT_CLASS_TYPE(klass);
     object_class->dispose = ofono_manager_dispose;
     object_class->finalize = ofono_manager_finalize;
     g_type_class_add_private(klass, sizeof(OfonoManagerPriv));
     ofono_manager_signals[MANAGER_SIGNAL_VALID_CHANGED] =
-        g_signal_new(MANAGER_SIGNAL_VALID_CHANGED_NAME,
-            G_OBJECT_CLASS_TYPE(klass), G_SIGNAL_RUN_FIRST,
-            0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+        g_signal_new(MANAGER_SIGNAL_VALID_CHANGED_NAME, class_type,
+            G_SIGNAL_RUN_FIRST, 0, NULL, NULL, NULL,
+            G_TYPE_NONE, 0);
     ofono_manager_signals[MANAGER_SIGNAL_MODEM_ADDED] =
-        g_signal_new(MANAGER_SIGNAL_MODEM_ADDED_NAME,
-            G_OBJECT_CLASS_TYPE(klass), G_SIGNAL_RUN_FIRST,
-            0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_OBJECT);
+        g_signal_new(MANAGER_SIGNAL_MODEM_ADDED_NAME, class_type,
+            G_SIGNAL_RUN_FIRST, 0, NULL, NULL, NULL,
+            G_TYPE_NONE, 1, G_TYPE_OBJECT);
     ofono_manager_signals[MANAGER_SIGNAL_MODEM_REMOVED] =
-        g_signal_new(MANAGER_SIGNAL_MODEM_REMOVED_NAME,
-            G_OBJECT_CLASS_TYPE(klass), G_SIGNAL_RUN_FIRST,
-            0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
-
-    /* Register ofono errors with gio */
-    ofono_error_quark();
+        g_signal_new(MANAGER_SIGNAL_MODEM_REMOVED_NAME, class_type,
+            G_SIGNAL_RUN_FIRST, 0, NULL, NULL, NULL,
+            G_TYPE_NONE, 1, G_TYPE_STRING);
 }
 
 /*

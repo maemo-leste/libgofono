@@ -40,37 +40,16 @@
 
 #define OFONO_BUSY_RETRY_DELAY (200) /* ms */
 
-/* Object state */
-typedef struct ofono_object_state OfonoObjectState;
-typedef struct ofono_object_state_call {
-    const OfonoObjectState* state;
-    GCancellable* cancellable;
+typedef struct ofono_object_get_properties_call {
+    GDBusProxy* proxy;
+    GCancellable* cancel;
     OfonoObject* object;
-} OfonoObjectStateCall;
-
-struct ofono_object_state {
-    const char* name;
-    OfonoObjectStateCall* (*fn_start)(
-        const OfonoObjectState* state,
-        OfonoObject* object);
-    const OfonoObjectState* (*fn_finish)(
-        OfonoObjectStateCall* call,
-        GAsyncResult* result,
-        int* retry_ms);
-    void (*fn_invalidate)(
-        const OfonoObjectState* state,
-        OfonoObject* object);
-
-    gboolean can_be_valid;
-    const OfonoObjectState* initialized;
-    const OfonoObjectState* revalidate;
-};
-
-static const OfonoObjectState OFONO_OBJECT_STATE_NONE;
-static const OfonoObjectState OFONO_OBJECT_STATE_INIT_PROXY;
-static const OfonoObjectState OFONO_OBJECT_STATE_INIT_PROPERTIES;
-static const OfonoObjectState OFONO_OBJECT_STATE_POST_INIT;
-static const OfonoObjectState OFONO_OBJECT_STATE_OK;
+    gboolean (*fn_finish)(
+        GDBusProxy* proxy,
+        GVariant** props,
+        GAsyncResult* res,
+        GError** error);
+} OfonoObjectGetPropertiesCall;
 
 /* Object definition */
 struct ofono_object_priv {
@@ -78,11 +57,12 @@ struct ofono_object_priv {
     char* path;
     GDBusConnection* bus;
     GDBusProxy* proxy;
-    const OfonoObjectState* state;
-    OfonoObjectStateCall* init_call;
-    guint init_retry_id;
-    gboolean invalid;
+    gboolean ready;
+    gboolean get_properties_ok;
+    OfonoObjectGetPropertiesCall* get_properties_pending;
+    guint get_properties_retry_id;
     gulong property_changed_signal_id;
+    GUtilIdlePool* pool;
     GHashTable* properties;
     GList* pending_calls;
 };
@@ -118,17 +98,17 @@ OFONO_INLINE OfonoObject* ofono_object_check(OfonoObject* obj) { return obj; }
 
 /* Forward declarations */
 static
+gboolean
+ofono_object_get_properties_retry(
+    gpointer user_data);
+
+static
 void
 ofono_object_property_changed(
     OFONO_OBJECT_PROXY* proxy,
     const char* name,
     GVariant* variant,
     gpointer data);
-
-static
-void
-ofono_object_update_valid(
-    OfonoObject* self);
 
 /*==========================================================================*
  * Default client proxy.
@@ -170,17 +150,11 @@ ofono_object_proxy_new(
     GAsyncReadyCallback callback,
     gpointer data)
 {
-    /*
-     * ASSUMPTION: data points to OfonoObjectStateCall. We need to get
-     * the pointer to the associated OfonoObject to figure out the interface
-     * name.
-     */
-    OfonoObjectStateCall* call = data;
-    GASSERT(G_TYPE_CHECK_INSTANCE_TYPE(call->object, OFONO_TYPE_OBJECT));
+    OfonoObject* self = OFONO_OBJECT(data);
     g_async_initable_new_async(OFONO_TYPE_PROXY, G_PRIORITY_DEFAULT,
        cancellable, callback, data, "g-flags", flags, "g-name", name,
        "g-connection", bus, "g-object-path", path,
-       "g-interface-name", call->object->priv->intf, NULL);
+       "g-interface-name", self->priv->intf, NULL);
 }
 
 static
@@ -302,289 +276,167 @@ ofono_object_proxy_class_init(
 }
 
 /*==========================================================================*
- * Object states
+ * Initialization
  *==========================================================================*/
 
 static
-OfonoObjectStateCall*
-ofono_object_state_call_new(
-    const OfonoObjectState* state,
-    OfonoObject* object)
+void
+ofono_object_setup_finished(
+    GObject* proxy,
+    GAsyncResult* result,
+    gpointer data)
 {
-    OfonoObjectStateCall* call = g_new(OfonoObjectStateCall, 1);
-    call->state = state;
-    call->cancellable = g_cancellable_new();
-    call->object = ofono_object_ref(object);
-    return call;
+    OfonoObjectGetPropertiesCall* call = data;
+    OfonoObject* object = call->object;
+    GError* error = NULL;
+    GVariant* props = NULL;
+    int retry_ms = -1;
+    gboolean ok = call->fn_finish(G_DBUS_PROXY(proxy), &props, result, &error);
+
+    if (ok) {
+        /* Success */
+        if (object) {
+            ofono_object_apply_properties(object, props);
+        }
+        g_variant_unref(props);
+    } else if (object) {
+        if (ofono_error_is_generic_timeout(error)) {
+            /* Retry immediately */
+            GWARN("%s.GetProperties %s", object->priv->intf, GERRMSG(error));
+            retry_ms = 0;
+        } else if (ofono_error_is_busy(error)) {
+            /* Retry after delay */
+            GWARN("%s.GetProperties %s", object->priv->intf, GERRMSG(error));
+            retry_ms = OFONO_BUSY_RETRY_DELAY;
+        } else if (error->code != G_IO_ERROR_CANCELLED) {
+            /* Something unrecoverable */
+            GERR("%s.GetProperties %s", object->priv->intf, GERRMSG(error));
+        }
+    }
+
+    if (retry_ms >= 0) {
+        OfonoObjectPriv* priv = object->priv;
+        GASSERT(!priv->get_properties_retry_id);
+        priv->get_properties_retry_id = g_timeout_add(retry_ms,
+            ofono_object_get_properties_retry, object);
+    } else {
+        if (call->object) {
+            OfonoObjectPriv* priv = call->object->priv;
+            priv->get_properties_ok = ok;
+            priv->get_properties_pending = NULL;
+            ofono_object_update_valid(call->object);
+        }
+        g_object_unref(call->proxy);
+        g_object_unref(call->cancel);
+        g_slice_free(OfonoObjectGetPropertiesCall, call);
+   }
+    if (error) g_error_free(error);
 }
 
 static
 void
-ofono_object_state_call_free(
-    OfonoObjectStateCall* call)
-{
-    ofono_object_unref(call->object);
-    g_object_unref(call->cancellable);
-    g_free(call);
-}
-
-static
-void
-ofono_object_cancel_init_call(
+ofono_object_cancel_get_properties(
     OfonoObject* self)
 {
     OfonoObjectPriv* priv = self->priv;
-    if (priv->init_call) {
-        g_cancellable_cancel(priv->init_call->cancellable);
-        priv->init_call = NULL;
+    if (priv->get_properties_pending) {
+        g_cancellable_cancel(priv->get_properties_pending->cancel);
+        priv->get_properties_pending->object = NULL;
+        priv->get_properties_pending = NULL;
     }
-    if (priv->init_retry_id) {
-        g_source_remove(priv->init_retry_id);
-        priv->init_retry_id = 0;
+    if (priv->get_properties_retry_id) {
+        g_source_remove(priv->get_properties_retry_id);
+        priv->get_properties_retry_id = 0;
     }
 }
 
 static
 void
-ofono_object_update_state(
-    OfonoObject* self,
-    const OfonoObjectState* next)
+ofono_object_start_get_properties(
+    OfonoObject* self)
 {
-    ofono_object_cancel_init_call(self);
-    GASSERT(next);
-    if (next) {
-        OfonoObjectPriv* priv = self->priv;
-        if (next->fn_start) {
-            priv->init_call = next->fn_start(next, self);
-        }
-        if (priv->state != next) {
-            priv->state = next;
-            ofono_object_update_valid(self);
-        }
+    OfonoObjectPriv* priv = self->priv;
+    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
+    GASSERT(priv->proxy);
+    if (klass->fn_proxy_call_get_properties) {
+        OfonoObjectGetPropertiesCall* call;
+
+        call = g_slice_new0(OfonoObjectGetPropertiesCall);
+        call->cancel = g_cancellable_new();
+        call->object = self;
+        g_object_ref(call->proxy = priv->proxy);
+        call->fn_finish = klass->fn_proxy_call_get_properties_finish;
+        GASSERT(call->fn_finish);
+
+        GASSERT(priv->property_changed_signal_id);
+        ofono_object_cancel_get_properties(self);
+        priv->get_properties_ok = FALSE;
+        priv->get_properties_pending = call;
+        klass->fn_proxy_call_get_properties(priv->proxy, call->cancel,
+            ofono_object_setup_finished, call);
     } else {
-        ofono_object_update_valid(self);
+        /* No properties to query */
+        priv->get_properties_ok = TRUE;
     }
 }
 
 static
 gboolean
-ofono_object_state_retry(
-    gpointer user_data)
+ofono_object_get_properties_retry(
+    gpointer data)
 {
-    OfonoObject* self = user_data;
+    OfonoObject* self = OFONO_OBJECT(data);
     OfonoObjectPriv* priv = self->priv;
-    GASSERT(priv->init_retry_id);
-    GASSERT(!priv->init_call);
-    priv->init_retry_id = 0;
-    GDEBUG("Retrying %s", priv->state->name);
-    ofono_object_update_state(self, priv->state);
-    return FALSE;
+    priv->get_properties_retry_id = 0;
+    GDEBUG("Retrying %s.GetProperties", priv->intf);
+    GASSERT(priv->get_properties_pending);
+    OFONO_OBJECT_GET_CLASS(self)->fn_proxy_call_get_properties(priv->proxy,
+        priv->get_properties_pending->cancel, ofono_object_setup_finished,
+        priv->get_properties_pending);
+    return G_SOURCE_REMOVE;
 }
 
 static
 void
-ofono_object_state_call_complete(
-    GObject* proxy,
+ofono_object_proxy_created(
+    OfonoObject* self,
+    GDBusProxy* proxy)
+{
+    OfonoObjectPriv* priv = self->priv;
+    GASSERT(!priv->proxy);
+    g_object_ref(priv->proxy = proxy);
+    GASSERT(!priv->property_changed_signal_id);
+    priv->property_changed_signal_id = g_signal_connect(proxy,
+        PROXY_SIGNAL_PROPERTY_CHANGED_NAME,
+        G_CALLBACK(ofono_object_property_changed), self);
+    ofono_object_update_ready(self);
+    ofono_object_update_valid(self);
+}
+
+static
+void
+ofono_object_create_proxy_finished(
+    GObject* source,
     GAsyncResult* result,
     gpointer data)
 {
-    OfonoObjectStateCall* call = data;
-    OfonoObjectPriv* priv = call->object->priv;
-    GASSERT(!priv->init_retry_id);
-    if (priv->init_call == call) {
-        int retry_ms = -1;
-        const OfonoObjectState* next =
-            call->state->fn_finish(call, result, &retry_ms);
-        priv->init_call = NULL;
-        GASSERT(next);
-        if (retry_ms >= 0) {
-
-            /*
-             * Postpone entering (or re-entering) this state after
-             * org.ofono.Error.InProgress or a D-Bus timeout.
-             */
-            priv->state = next;
-            priv->init_retry_id = g_timeout_add(retry_ms,
-                ofono_object_state_retry, call->object);
-        } else {
-            ofono_object_update_state(call->object, next);
-        }
-    }
-    ofono_object_state_call_free(call);
-}
-
-static
-OfonoObjectStateCall*
-ofono_object_state_init_proxy_start(
-    const OfonoObjectState* state,
-    OfonoObject* object)
-{
-    OfonoObjectPriv* priv = object->priv;
-    GASSERT(!priv->proxy);
-    if (priv->bus) {
-        OfonoObjectStateCall* call = ofono_object_state_call_new(state, object);
-        OFONO_OBJECT_GET_CLASS(object)->fn_proxy_new(priv->bus,
-            G_DBUS_PROXY_FLAGS_NONE, OFONO_SERVICE, object->path,
-            call->cancellable, ofono_object_state_call_complete, call);
-        return call;
-    }
-    return NULL;
-}
-
-static
-const OfonoObjectState*
-ofono_object_state_init_proxy_finish(
-    OfonoObjectStateCall* call,
-    GAsyncResult* result,
-    int* retry_ms)
-{
     GError* error = NULL;
-    OfonoObject* object = call->object;
-    OfonoObjectPriv* priv = object->priv;
-    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(object);
-    const OfonoObjectState* next;
+    OfonoObject* self = OFONO_OBJECT(data);
+    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
     OFONO_OBJECT_PROXY* proxy;
 
     /* Retrieve the result */
     GASSERT(klass->fn_proxy_new_finish);
     proxy = klass->fn_proxy_new_finish(result, &error);
     if (proxy) {
-        GASSERT(!priv->proxy);
-        priv->proxy = G_DBUS_PROXY(proxy);
-        if (klass->fn_proxy_call_get_properties) {
-            priv->property_changed_signal_id = g_signal_connect(
-                priv->proxy, PROXY_SIGNAL_PROPERTY_CHANGED_NAME,
-                G_CALLBACK(ofono_object_property_changed), object);
-            next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
-        } else {
-            next = klass->fn_initialized(object) ?
-                &OFONO_OBJECT_STATE_OK :
-                &OFONO_OBJECT_STATE_POST_INIT;
-        }
+        klass->fn_proxy_created(self, proxy);
     } else {
-        next = NULL;
-        priv->invalid = TRUE;
-#if GUTIL_LOG_ERR
-        if (error->code != G_IO_ERROR_CANCELLED) {
-            GERR("%s", GERRMSG(error));
-        }
-#endif
+        GERR("%s", GERRMSG(error));
     }
 
     if (error) g_error_free(error);
-    return next;
+    ofono_object_unref(self);
 }
-
-static
-OfonoObjectStateCall*
-ofono_object_state_init_properties_start(
-    const OfonoObjectState* state,
-    OfonoObject* object)
-{
-    OfonoObjectPriv* priv = object->priv;
-    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(object);
-    OfonoObjectStateCall* call = NULL;
-    /* klass->fn_proxy_call_get_properties pointer has been checked
-     * by ofono_object_state_init_proxy_finish() callback */
-    GASSERT(klass->fn_proxy_call_get_properties);
-    GASSERT(priv->proxy);
-    if (!priv->invalid) {
-        call = ofono_object_state_call_new(state, object);
-        klass->fn_proxy_call_get_properties(priv->proxy, call->cancellable,
-            ofono_object_state_call_complete, call);
-    }
-    return call;
-}
-
-static
-const OfonoObjectState*
-ofono_object_state_init_properties_finish(
-    OfonoObjectStateCall* call,
-    GAsyncResult* result,
-    int* retry_ms)
-{
-    GError* error = NULL;
-    GVariant* properties = NULL;
-    OfonoObject* object = call->object;
-    OfonoObjectPriv* priv = object->priv;
-    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(object);
-    const OfonoObjectState* next;
-
-    /* Retrieve the result */
-    GASSERT(klass->fn_proxy_call_get_properties_finish);
-    if (klass->fn_proxy_call_get_properties_finish(priv->proxy, &properties,
-        result, &error)) {
-        ofono_object_apply_properties(object, properties);
-        g_variant_unref(properties);
-        next = klass->fn_initialized(object) ?
-            &OFONO_OBJECT_STATE_OK :
-            &OFONO_OBJECT_STATE_POST_INIT;
-    } else if (ofono_error_is_generic_timeout(error)) {
-        /* Retry immediately */
-        GWARN("%s", GERRMSG(error));
-        next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
-        *retry_ms = 0;
-    } else if (error->domain == OFONO_ERROR && error->code == OFONO_ERROR_BUSY) {
-        /* Retry after delay */
-        GWARN("%s", GERRMSG(error));
-        next = &OFONO_OBJECT_STATE_INIT_PROPERTIES;
-        *retry_ms = OFONO_BUSY_RETRY_DELAY;
-    } else {
-        /* Something unrecoverable, it seems */
-        next = NULL;
-        priv->invalid = TRUE;
-#if GUTIL_LOG_ERR
-        if (error->code != G_IO_ERROR_CANCELLED) {
-            GERR("%s", GERRMSG(error));
-        }
-#endif
-    }
-    if (error) g_error_free(error);
-    return next;
-}
-
-static
-void
-ofono_object_state_init_properties_invalidate(
-    const OfonoObjectState* state,
-    OfonoObject* object)
-{
-    if (object->priv->init_call) {
-        GASSERT(object->priv->init_call->state == state);
-        ofono_object_cancel_init_call(object);
-    }
-}
-
-static const OfonoObjectState OFONO_OBJECT_STATE_NONE = {
-    "NONE", NULL, NULL, NULL, FALSE, NULL,
-    &OFONO_OBJECT_STATE_INIT_PROXY /* revalidate */
-};
-
-static const OfonoObjectState OFONO_OBJECT_STATE_INIT_PROXY = {
-    "INIT_PROXY",
-    ofono_object_state_init_proxy_start,
-    ofono_object_state_init_proxy_finish,
-    NULL, FALSE, NULL, NULL
-};
-
-static const OfonoObjectState OFONO_OBJECT_STATE_INIT_PROPERTIES = {
-    "INIT_PROPERTIES",
-    ofono_object_state_init_properties_start,
-    ofono_object_state_init_properties_finish,
-    ofono_object_state_init_properties_invalidate,
-    FALSE, NULL, NULL
-};
-
-static const OfonoObjectState OFONO_OBJECT_STATE_POST_INIT = {
-    "POST_INIT", NULL, NULL, NULL, FALSE,
-    &OFONO_OBJECT_STATE_OK,             /* initialized */
-    &OFONO_OBJECT_STATE_INIT_PROPERTIES /* revalidate */
-};
-
-static const OfonoObjectState OFONO_OBJECT_STATE_OK = {
-    "OK", NULL, NULL, NULL, TRUE, NULL,
-    &OFONO_OBJECT_STATE_INIT_PROPERTIES /* revalidate */
-};
 
 /*==========================================================================*
  * Implementation
@@ -751,20 +603,6 @@ ofono_object_set_property_finished(
     if (error) g_error_free(error);
 }
 
-static
-void
-ofono_object_update_valid(
-    OfonoObject* self)
-{
-    OfonoObjectPriv* priv = self->priv;
-    const gboolean valid = !priv->invalid && priv->state->can_be_valid &&
-        !priv->init_call && !priv->init_retry_id;
-    if (self->valid != valid) {
-        self->valid = valid;
-        OFONO_OBJECT_GET_CLASS(self)->fn_valid_changed(self);
-    }
-}
-
 /*==========================================================================*
  * API
  *==========================================================================*/
@@ -806,11 +644,41 @@ ofono_object_initialize(
     const char* intf,
     const char* path)
 {
-    GASSERT(!self->priv->path);
     OfonoObjectPriv* priv = self->priv;
+    GASSERT(!priv->path);
     self->intf = priv->intf = g_strdup(intf);
     self->path = priv->path = g_strdup(path);
-    ofono_object_update_state(self, &OFONO_OBJECT_STATE_INIT_PROXY);
+    if (priv->bus) {
+        OFONO_OBJECT_GET_CLASS(self)->fn_proxy_new(priv->bus,
+            G_DBUS_PROXY_FLAGS_NONE, OFONO_SERVICE, self->path,
+            NULL, ofono_object_create_proxy_finished,
+            ofono_object_ref(self));
+    }
+}
+
+void
+ofono_object_update_ready(
+    OfonoObject* self)
+{
+    OfonoObjectPriv* priv = self->priv;
+    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
+    const gboolean ready = klass->fn_is_ready(self);
+    if (priv->ready != ready) {
+        priv->ready = ready;
+        klass->fn_ready_changed(self, ready);
+    }
+}
+
+void
+ofono_object_update_valid(
+    OfonoObject* self)
+{
+    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
+    const gboolean valid = klass->fn_is_valid(self);
+    if (self->valid != valid) {
+        self->valid = valid;
+        klass->fn_valid_changed(self);
+    }
 }
 
 void
@@ -848,13 +716,38 @@ ofono_object_apply_properties(
 }
 
 GVariant*
+ofono_object_get_properties(
+    OfonoObject* self)
+{
+    OfonoObjectPriv* priv = self->priv;
+    GHashTableIter it;
+    gpointer key, value;
+    GVariantBuilder builder;
+    GVariant* properties;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+    g_hash_table_iter_init(&it, self->priv->properties);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        g_variant_builder_add(&builder, "{sv}", key, value);
+    }
+    properties = g_variant_take_ref(g_variant_builder_end(&builder));
+    gutil_idle_pool_add_variant(priv->pool, properties);
+    return properties;
+}
+
+GVariant*
 ofono_object_get_property(
     OfonoObject* self,
     const char* name,
     const GVariantType* type)
 {
-    GVariant* value = g_hash_table_lookup(self->priv->properties, name);
-    return (value && type && !g_variant_is_of_type(value, type)) ? NULL : value;
+    OfonoObjectPriv* priv = self->priv;
+    GVariant* value = g_hash_table_lookup(priv->properties, name);
+    if (value && (!type || g_variant_is_of_type(value, type))) {
+        gutil_idle_pool_add_variant_ref(priv->pool, value);
+        return value;
+    } else {
+        return NULL;
+    }
 }
 
 const char*
@@ -890,9 +783,11 @@ GPtrArray*
 ofono_object_get_property_keys(
     OfonoObject* self)
 {
+    OfonoObjectPriv* priv = self->priv;
     GPtrArray* keys = g_ptr_array_new_with_free_func(g_free);
-    g_hash_table_foreach(self->priv->properties,
+    g_hash_table_foreach(priv->properties,
         ofono_object_get_property_keys_callback, keys);
+    gutil_idle_pool_add_ptr_array(priv->pool, keys);
     return keys;
 }
 
@@ -1008,31 +903,6 @@ ofono_object_remove_handlers(
     unsigned int count)
 {
     gutil_disconnect_handlers(self, ids, count);
-}
-
-void
-ofono_object_set_invalid(
-    OfonoObject* self,
-    gboolean invalid)
-{
-    OfonoObjectPriv* priv = self->priv;
-    if (priv->invalid && !invalid) {
-        priv->invalid = FALSE;
-        ofono_object_update_state(self, priv->state->revalidate ?
-            priv->state->revalidate : priv->state);
-    } else if (!priv->invalid && invalid) {
-        priv->invalid = TRUE;
-        OFONO_OBJECT_GET_CLASS(self)->fn_invalidate(self);
-    }
-}
-
-void
-ofono_object_set_initialized(
-    OfonoObject* self)
-{
-    OfonoObjectPriv* priv = self->priv;
-    GASSERT(priv->state->initialized);
-    ofono_object_update_state(self, priv->state->initialized);
 }
 
 GDBusConnection*
@@ -1288,19 +1158,21 @@ ofono_object_property_string_reset(
 
 static
 gboolean
-ofono_object_initialized(
-    OfonoObject* object)
+ofono_object_is_ready(
+    OfonoObject* self)
 {
-    return TRUE;
+    OfonoObjectPriv* priv = self->priv;
+    return priv->proxy != NULL;
 }
 
 static
-void
-ofono_object_valid_changed(
+gboolean
+ofono_object_is_valid(
     OfonoObject* self)
 {
-    g_signal_emit(self, ofono_object_signals[
-        OFONO_OBJECT_SIGNAL_VALID_CHANGED], 0);
+    OfonoObjectPriv* priv = self->priv;
+    return ofono_object_is_ready(self) && !priv->get_properties_pending &&
+        !priv->get_properties_retry_id && priv->get_properties_ok;
 }
 
 static
@@ -1315,17 +1187,34 @@ ofono_object_cancel_call(
 
 static
 void
-ofono_object_invalidate(
-    OfonoObject* self)
+ofono_object_ready_changed(
+    OfonoObject* self,
+    gboolean ready)
 {
     OfonoObjectPriv* priv = self->priv;
-    GASSERT(priv->invalid);
-    ofono_object_update_valid(self);
-    ofono_object_reset_properties(self);
-    g_list_foreach(priv->pending_calls, ofono_object_cancel_call, NULL);
-    if (priv->state->fn_invalidate) {
-        priv->state->fn_invalidate(priv->state, self);
+    GASSERT(priv->ready == ready);
+    if (priv->ready) {
+        if (priv->proxy) {
+            ofono_object_cancel_get_properties(self);
+            ofono_object_start_get_properties(self);
+            ofono_object_update_valid(self);
+        }
+    } else {
+        priv->get_properties_ok = FALSE;
+        ofono_object_cancel_get_properties(self);
+        ofono_object_reset_properties(self);
+        g_list_foreach(priv->pending_calls, ofono_object_cancel_call, NULL);
+        ofono_object_update_valid(self);
     }
+}
+
+static
+void
+ofono_object_valid_changed(
+    OfonoObject* self)
+{
+    g_signal_emit(self, ofono_object_signals[
+        OFONO_OBJECT_SIGNAL_VALID_CHANGED], 0);
 }
 
 /**
@@ -1350,13 +1239,10 @@ ofono_object_dispose(
 {
     OfonoObject* self = OFONO_OBJECT(object);
     OfonoObjectPriv* priv = self->priv;
-    ofono_object_update_state(self, &OFONO_OBJECT_STATE_NONE);
+    ofono_object_cancel_get_properties(self);
     if (priv->proxy) {
-        if (priv->property_changed_signal_id) {
-            g_signal_handler_disconnect(priv->proxy,
-                priv->property_changed_signal_id);
-            priv->property_changed_signal_id = 0;
-        }
+        gutil_disconnect_handlers(priv->proxy,
+            &priv->property_changed_signal_id, 1);
         g_object_unref(priv->proxy);
         priv->proxy = NULL;
     }
@@ -1378,6 +1264,7 @@ ofono_object_finalize(
     OfonoObject* self = OFONO_OBJECT(object);
     OfonoObjectPriv* priv = self->priv;
     GASSERT(!priv->pending_calls);
+    gutil_idle_pool_unref(priv->pool);
     g_hash_table_unref(priv->properties);
     g_free(priv->intf);
     g_free(priv->path);
@@ -1396,7 +1283,7 @@ ofono_object_init(
     OfonoObjectPriv* priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_OBJECT, OfonoObjectPriv);
     self->priv = priv;
-    priv->state = &OFONO_OBJECT_STATE_NONE;
+    priv->pool = gutil_idle_pool_ref(ofono_idle_pool());
     priv->bus = g_bus_get_sync(OFONO_BUS_TYPE, NULL, &error);
     if (priv->bus) {
         g_dbus_connection_set_exit_on_close(priv->bus, FALSE);
@@ -1419,9 +1306,11 @@ ofono_object_class_init(
     GObjectClass* object_class = G_OBJECT_CLASS(klass);
     ofono_object_class = klass;
     g_type_class_add_private(klass, sizeof(OfonoObjectPriv));
-    klass->fn_initialized = ofono_object_initialized;
-    klass->fn_invalidate = ofono_object_invalidate;
+    klass->fn_is_ready = ofono_object_is_ready;
+    klass->fn_is_valid = ofono_object_is_valid;
+    klass->fn_ready_changed = ofono_object_ready_changed;
     klass->fn_valid_changed = ofono_object_valid_changed;
+    klass->fn_proxy_created = ofono_object_proxy_created;
 
     /* Default proxy callbacks */
     klass->fn_proxy_new = ofono_object_proxy_new;

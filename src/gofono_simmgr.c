@@ -59,24 +59,6 @@ G_DEFINE_TYPE(OfonoSimMgr, ofono_simmgr, OFONO_TYPE_MODEM_INTERFACE)
 #define SIMMGR_SIGNAL_SPN_CHANGED_NAME     "spn-changed"
 
 /*==========================================================================*
- * Implementation
- *==========================================================================*/
-
-#if GUTIL_LOG_DEBUG
-static
-gboolean
-ofono_simmgr_initialized(
-    OfonoObject* obj)
-{
-    OfonoSimMgr* self = OFONO_SIMMGR(obj);
-    OfonoSimMgrPriv* priv = self->priv;
-    GDEBUG("%s: SIM %spresent", priv->name, self->present ? "" : "not ");
-    GDEBUG("%s: IMSI %s", priv->name, self->imsi);
-    return OFONO_OBJECT_CLASS(ofono_simmgr_parent_class)->fn_initialized(obj);
-}
-#endif /* GUTIL_LOG_DEBUG */
-
-/*==========================================================================*
  * API
  *==========================================================================*/
 
@@ -277,9 +259,6 @@ ofono_simmgr_class_init(
     OfonoObjectClass* ofono = &klass->object;
     G_OBJECT_CLASS(klass)->finalize = ofono_simmgr_finalize;
     g_type_class_add_private(klass, sizeof(OfonoSimMgrPriv));
-#if GUTIL_LOG_DEBUG
-    ofono->fn_initialized = ofono_simmgr_initialized;
-#endif /* GUTIL_LOG_DEBUG */
     ofono->properties = ofono_simmgr_properties;
     ofono->nproperties = G_N_ELEMENTS(ofono_simmgr_properties);
     OFONO_OBJECT_CLASS_SET_PROXY_CALLBACKS(ofono, org_ofono_sim_manager);

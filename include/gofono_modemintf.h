@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -44,6 +44,12 @@ typedef struct ofono_modem_interface {
     OfonoModemInterfacePriv* priv;
     OfonoModem* modem;
 } OfonoModemInterface;
+
+typedef
+void
+(*OfonoModemInterfaceHandler)(
+    OfonoModemInterface* sender,
+    void* arg);
 
 OfonoModemInterface*
 ofono_modem_interface_new(

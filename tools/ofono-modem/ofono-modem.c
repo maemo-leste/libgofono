@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2014-2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -32,6 +32,7 @@
 
 #include "gofono_manager.h"
 #include "gofono_modem.h"
+#include "gofono_util.h"
 
 #include <gutil_log.h>
 
@@ -74,7 +75,6 @@ handle_modem(
             printf("%s\n", key);
         }
     }
-    g_ptr_array_unref(keys);
 }
 
 static
@@ -110,7 +110,6 @@ handle_manager(
             }
         }
     }
-    g_ptr_array_unref(modems);
     return ret;
 }
 
@@ -131,6 +130,7 @@ app_run(
         g_error_free(error);
     }
     ofono_manager_unref(manager);
+    ofono_idle_pool_drain();
     return ret;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Jolla Ltd.
+ * Copyright (C) 2016 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -30,17 +30,64 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef GOFONO_CONNCTX_PRIVATE_H
-#define GOFONO_CONNCTX_PRIVATE_H
+#ifndef GOFONO_MANAGER_PROXY_H
+#define GOFONO_MANAGER_PROXY_H
 
-#include "gofono_connctx.h"
+#include "gofono_types.h"
 
-OfonoConnCtx*
-ofono_connctx_new_internal(
-    const char* path,
-    GVariant* properties);
+G_BEGIN_DECLS
 
-#endif /* GOFONO_CONNCTX_PRIVATE_H */
+typedef struct ofono_manager_proxy_priv OfonoManagerProxyPriv;
+
+typedef struct ofono_manager_prixy {
+    GObject object;
+    OfonoManagerProxyPriv* priv;
+    GPtrArray* modem_paths;
+    gboolean valid;
+} OfonoManagerProxy;
+
+typedef
+void
+(*OfonoManagerProxyHandler)(
+    OfonoManagerProxy* proxy,
+    void* arg);
+
+typedef
+void
+(*OfonoManagerProxyModemHandler)(
+    OfonoManagerProxy* proxy,
+    const char* modem,
+    void* arg);
+
+OfonoManagerProxy*
+ofono_manager_proxy_new(void);
+
+gboolean
+ofono_manager_proxy_has_modem(
+    OfonoManagerProxy* proxy,
+    const char* path);
+
+gulong
+ofono_manager_proxy_add_valid_changed_handler(
+    OfonoManagerProxy* proxy,
+    OfonoManagerProxyHandler fn,
+    void* arg);
+
+gulong
+ofono_manager_proxy_add_modem_added_handler(
+    OfonoManagerProxy* proxy,
+    OfonoManagerProxyModemHandler fn,
+    void* arg);
+
+gulong
+ofono_manager_proxy_add_modem_removed_handler(
+    OfonoManagerProxy* proxy,
+    OfonoManagerProxyModemHandler fn,
+    void* arg);
+
+G_END_DECLS
+
+#endif /* GOFONO_MANAGER_PROXY_H */
 
 /*
  * Local Variables:

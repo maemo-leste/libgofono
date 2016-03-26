@@ -60,9 +60,16 @@ void
 
 typedef
 void
-(*OfonoConnMgrContextHandler)(
+(*OfonoConnMgrContextAddedHandler)(
     OfonoConnMgr* sender,
     OfonoConnCtx* context,
+    void* arg);
+
+typedef
+void
+(*OfonoConnMgrContextRemovedHandler)(
+    OfonoConnMgr* sender,
+    const char* path,
     void* arg);
 
 typedef
@@ -108,13 +115,13 @@ ofono_connmgr_add_valid_changed_handler(
 gulong
 ofono_connmgr_add_context_added_handler(
     OfonoConnMgr* mgr,
-    OfonoConnMgrContextHandler handler,
+    OfonoConnMgrContextAddedHandler handler,
     void* arg);
 
 gulong
 ofono_connmgr_add_context_removed_handler(
     OfonoConnMgr* mgr,
-    OfonoConnMgrContextHandler handler,
+    OfonoConnMgrContextRemovedHandler handler,
     void* arg);
 
 /* Properties */
