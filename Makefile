@@ -18,9 +18,9 @@ all: debug release pkgconfig
 # Library version
 #
 
-VERSION_MAJOR = 1
+VERSION_MAJOR = 2
 VERSION_MINOR = 0
-VERSION_RELEASE = 11
+VERSION_RELEASE = 0
 
 # Version for pkg-config
 PCVERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_RELEASE)

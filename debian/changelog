@@ -1,3 +1,14 @@
+libgofono (2.0.0) unstable; urgency=low
+
+  * Refactored OfonoObject and a few other modules
+  * Added ofono_object_get_properties
+  * ofono_manager_get_modems API break
+  * ofono_connmgr_get_contexts API break
+  * ofono_object_get_property_keys API break
+  * ofono_connmgr_add_context_removed_handler API break
+
+ -- Slava Monich <slava.monich@jolla.com>  Thu, 31 Mar 2016 19:23:03 +0300
+
 libgofono (1.0.11) unstable; urgency=low
 
   * Retry SetProperty("Active") on org.ofono.Error.InProgress
