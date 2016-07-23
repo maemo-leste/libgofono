@@ -1,3 +1,9 @@
+libgofono (2.0.1) unstable; urgency=low
+
+  * Updated country list
+
+ -- Slava Monich <slava.monich@jolla.com>  Sat, 23 Jul 2016 18:41:53 +0300
+
 libgofono (2.0.0) unstable; urgency=low
 
   * Refactored OfonoObject and a few other modules
