@@ -1,5 +1,5 @@
 Name: libgofono
-Version: 2.0.1
+Version: 2.0.2
 Release: 0
 Summary: Ofono client library
 Group: Development/Libraries
