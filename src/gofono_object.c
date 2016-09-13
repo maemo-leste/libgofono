@@ -593,7 +593,11 @@ ofono_object_set_property_finished(
     /* Retrieve the result */
     GASSERT(klass->fn_proxy_call_set_property_finish);
     if (!klass->fn_proxy_call_set_property_finish(proxy, result, &error)) {
-        GERR("%s", GERRMSG(error));
+        if (error->domain == OFONO_ERROR && error->code == OFONO_ERROR_BUSY) {
+            GDEBUG("%s", GERRMSG(error));
+        } else {
+            GERR("%s", GERRMSG(error));
+        }
     }
 
     /* Notify the derived class if necessary */
