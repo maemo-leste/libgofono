@@ -430,6 +430,7 @@ ofono_object_create_proxy_finished(
     proxy = klass->fn_proxy_new_finish(result, &error);
     if (proxy) {
         klass->fn_proxy_created(self, proxy);
+        g_object_unref(proxy);
     } else {
         GERR("%s", GERRMSG(error));
     }
@@ -1244,6 +1245,7 @@ ofono_object_dispose(
     OfonoObject* self = OFONO_OBJECT(object);
     OfonoObjectPriv* priv = self->priv;
     ofono_object_cancel_get_properties(self);
+    ofono_object_reset_properties(self);
     if (priv->proxy) {
         gutil_disconnect_handlers(priv->proxy,
             &priv->property_changed_signal_id, 1);
