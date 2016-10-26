@@ -1,3 +1,11 @@
+libgofono (2.0.3) unstable; urgency=low
+
+  * Fixed typo in pkgconfig file
+  * Retry org.ofono.Manager.GetModems on any error
+  * Fixed a few memory leaks
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 26 Oct 2016 19:58:30 +0300
+
 libgofono (2.0.2) unstable; urgency=low
 
   * Lower log level for org.ofono.Error.InProgress
