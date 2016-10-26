@@ -43,6 +43,8 @@
  * OfonoManager and OfonoModem.
  */
 
+#define GET_MODEMS_RETRY_DELAY (1000) /* ms */
+
 /* Generated headers */
 #include "org.ofono.Manager.h"
 
@@ -57,6 +59,7 @@ struct ofono_manager_proxy_priv {
     GDBusConnection* bus;
     OrgOfonoManager* proxy;
     GCancellable* cancel;
+    guint get_modems_retry_id;
     guint ofono_watch_id;
     gulong proxy_handler_id[PROXY_HANDLER_COUNT];
 };
@@ -79,6 +82,13 @@ enum ofono_proxy_manager_signal {
 #define SIGNAL_MODEM_REMOVED_NAME       "gofono-modem-removed"
 
 static guint ofono_manager_proxy_signals[SIGNAL_COUNT] = { 0 };
+
+static
+void
+ofono_manager_proxy_get_modems_finished(
+    GObject* proxy,
+    GAsyncResult* result,
+    gpointer data);
 
 /*==========================================================================*
  * Implementation
@@ -130,6 +140,10 @@ ofono_manager_proxy_reset(
             G_N_ELEMENTS(priv->proxy_handler_id));
         g_object_unref(priv->proxy);
         priv->proxy = NULL;
+    }
+    if (priv->get_modems_retry_id) {
+        g_source_remove(priv->get_modems_retry_id);
+        priv->get_modems_retry_id = 0;
     }
     if (self->valid) {
         self->valid = FALSE;
@@ -185,6 +199,23 @@ ofono_manager_proxy_modem_removed(
 }
 
 static
+gboolean
+ofono_manager_proxy_get_modems_retry(
+    gpointer data)
+{
+    OfonoManagerProxy* self = OFONO_MANAGER_PROXY(data);
+    OfonoManagerProxyPriv* priv = self->priv;
+    GASSERT(priv->get_modems_retry_id);
+    priv->get_modems_retry_id = 0;
+    GDEBUG("Retrying %s.GetModems", OFONO_MANAGER_INTERFACE_NAME);
+    GASSERT(!priv->cancel);
+    priv->cancel = g_cancellable_new();
+    org_ofono_manager_call_get_modems(priv->proxy, priv->cancel,
+        ofono_manager_proxy_get_modems_finished, g_object_ref(self));
+    return G_SOURCE_REMOVE;
+}
+
+static
 void
 ofono_manager_proxy_get_modems_finished(
     GObject* proxy,
@@ -195,7 +226,6 @@ ofono_manager_proxy_get_modems_finished(
     GVariant* modems = NULL;
     OfonoManagerProxy* self = OFONO_MANAGER_PROXY(data);
     OfonoManagerProxyPriv* priv = self->priv;
-    gboolean need_cancel = FALSE;
 
     GASSERT(ORG_OFONO_MANAGER(proxy) == priv->proxy);
 
@@ -220,23 +250,21 @@ ofono_manager_proxy_get_modems_finished(
         self->valid = TRUE;
         g_signal_emit(self, ofono_manager_proxy_signals[
             SIGNAL_VALID_CHANGED], 0);
-    } else if (ofono_error_is_generic_timeout(error)) {
-        GWARN("%s.GetModems %s", OFONO_MANAGER_INTERFACE_NAME, GERRMSG(error));
-        /* If priv->cancel is NULL, it must have been cancelled,
-         * don't retry then */
-        if (priv->cancel) {
-            need_cancel = TRUE;
-            GDEBUG("Retrying %s.GetModems", OFONO_MANAGER_INTERFACE_NAME);
-            org_ofono_manager_call_get_modems(priv->proxy, priv->cancel,
-                ofono_manager_proxy_get_modems_finished, g_object_ref(self));
-        }
-    } else {
+    } else if (!priv->cancel) {
+        /* If priv->cancel is NULL then it's been cancelled, don't retry */
         GERR("%s.GetModems %s", OFONO_MANAGER_INTERFACE_NAME, GERRMSG(error));
-    }
-
-    if (!need_cancel && priv->cancel) {
-        g_object_unref(priv->cancel);
-        priv->cancel = NULL;
+    } else if (ofono_error_is_generic_timeout(error)) {
+        /* Retry immediately after timeout */
+        GWARN("%s.GetModems %s", OFONO_MANAGER_INTERFACE_NAME, GERRMSG(error));
+        GDEBUG("Retrying %s.GetModems", OFONO_MANAGER_INTERFACE_NAME);
+        org_ofono_manager_call_get_modems(priv->proxy, priv->cancel,
+            ofono_manager_proxy_get_modems_finished, g_object_ref(self));
+    } else {
+        /* Wait a bit, then retry */
+        GERR("%s.GetModems %s", OFONO_MANAGER_INTERFACE_NAME, GERRMSG(error));
+        GASSERT(!priv->get_modems_retry_id);
+        priv->get_modems_retry_id = g_timeout_add(GET_MODEMS_RETRY_DELAY,
+            ofono_manager_proxy_get_modems_retry, self);
     }
 
     if (error) g_error_free(error);
@@ -307,11 +335,6 @@ ofono_manager_proxy_vanished(
     OfonoManagerProxy* self = OFONO_MANAGER_PROXY(arg);
     GDEBUG("Name '%s' has disappeared", name);
     ofono_manager_proxy_reset(self);
-    if (self->valid) {
-        self->valid = FALSE;
-        g_signal_emit(self, ofono_manager_proxy_signals[
-            SIGNAL_VALID_CHANGED], 0);
-    }
 }
 
 /*==========================================================================*
