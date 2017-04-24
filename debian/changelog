@@ -1,3 +1,9 @@
+libgofono (2.0.4) unstable; urgency=low
+
+  * Do not query D-Bus properties from ofono
+
+ -- Slava Monich <slava.monich@jolla.com>  Mon, 24 Apr 2017 18:45:12 +0300
+
 libgofono (2.0.3) unstable; urgency=low
 
   * Fixed typo in pkgconfig file
