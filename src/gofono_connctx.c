@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
+ * Copyright (C) 2014-2017 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -13,8 +13,8 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
+ *   3. Neither the name of Jolla Ltd nor the names of its contributors may
+ *      be used to endorse or promote products derived from this software
  *      without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
@@ -517,8 +517,8 @@ ofono_connctx_create(
 
         /* Initialize ConnectionManager proxy */
         org_ofono_connection_manager_proxy_new(ofono_object_bus(object),
-            G_DBUS_PROXY_FLAGS_NONE, OFONO_SERVICE, modem_path, NULL,
-            ofono_connctx_connection_manager_proxy_created,
+            G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES, OFONO_SERVICE,
+            modem_path, NULL, ofono_connctx_connection_manager_proxy_created,
             ofono_connctx_ref(self));
 
         g_free(modem_path);
