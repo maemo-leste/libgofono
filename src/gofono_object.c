@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
+ * Copyright (C) 2014-2017 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -13,8 +13,8 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
+ *   3. Neither the name of Jolla Ltd nor the names of its contributors may
+ *      be used to endorse or promote products derived from this software
  *      without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
@@ -655,8 +655,8 @@ ofono_object_initialize(
     self->path = priv->path = g_strdup(path);
     if (priv->bus) {
         OFONO_OBJECT_GET_CLASS(self)->fn_proxy_new(priv->bus,
-            G_DBUS_PROXY_FLAGS_NONE, OFONO_SERVICE, self->path,
-            NULL, ofono_object_create_proxy_finished,
+            G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES, OFONO_SERVICE,
+            self->path, NULL, ofono_object_create_proxy_finished,
             ofono_object_ref(self));
     }
 }
