@@ -163,8 +163,10 @@ static const OfonoNameIntMap ofono_connctx_protocol_map = {
 };
 
 static const OfonoNameIntPair ofono_connctx_auth_values[] = {
+    { "none", OFONO_CONNCTX_AUTH_NONE },
     { "pap",  OFONO_CONNCTX_AUTH_PAP },
-    { "chap", OFONO_CONNCTX_AUTH_CHAP }
+    { "chap", OFONO_CONNCTX_AUTH_CHAP },
+    { "any",  OFONO_CONNCTX_AUTH_ANY }
 };
 
 static const OfonoNameIntMap ofono_connctx_auth_map = {
