@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
+ * Copyright (C) 2014-2018 Jolla Ltd.
  * Contact: Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
@@ -13,8 +13,8 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
+ *   3. Neither the name of Jolla Ltd nor the names of its contributors may
+ *      be used to endorse or promote products derived from this software
  *      without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
@@ -45,18 +45,7 @@ static GUtilIdlePool* ofono_shared_pool = NULL;
 GUtilIdlePool*
 ofono_idle_pool()
 {
-    if (!ofono_shared_pool) {
-        ofono_shared_pool = gutil_idle_pool_new();
-        g_object_add_weak_pointer(G_OBJECT(ofono_shared_pool),
-            (gpointer*)&ofono_shared_pool);
-        /*
-         * Add ofono_shared_pool itself to the pool, so that if
-         * the caller doesn't reference it, the pool will end up
-         * destroying itself.
-         */
-        gutil_idle_pool_add_object(ofono_shared_pool, ofono_shared_pool);
-    }
-    return ofono_shared_pool;
+    return gutil_idle_pool_get(&ofono_shared_pool);
 }
 
 void
