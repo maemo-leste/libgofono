@@ -102,6 +102,37 @@ void
 ofono_simmgr_unref(
     OfonoSimMgr* sim);
 
+/* Methods */
+
+/* TODO: Make async */
+gboolean ofono_simmgr_enter_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
+gboolean ofono_simmgr_change_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* oldpin,
+    const gchar* newpin);
+
+gboolean ofono_simmgr_reset_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* puk,
+    const gchar* newpin);
+
+gboolean ofono_simmgr_lock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
+gboolean ofono_simmgr_unlock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
+
 /* Properties */
 
 gulong

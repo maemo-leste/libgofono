@@ -52,6 +52,7 @@ struct ofono_simmgr_priv {
 
 typedef OfonoModemInterfaceClass OfonoSimMgrClass;
 G_DEFINE_TYPE(OfonoSimMgr, ofono_simmgr, OFONO_TYPE_MODEM_INTERFACE)
+#define SUPER_CLASS ofono_simmgr_parent_class
 
 #define SIMMGR_SIGNAL_PRESENT_CHANGED_NAME      "present-changed"
 #define SIMMGR_SIGNAL_IMSI_CHANGED_NAME         "imsi-changed"
@@ -89,6 +90,32 @@ static const OfonoNameIntMap ofono_simmgr_pin_required_map = {
 /*==========================================================================*
  * API
  *==========================================================================*/
+
+OFONO_INLINE
+OFONO_OBJECT_PROXY*
+ofono_simmgr_proxy(
+    OfonoSimMgr* self)
+{
+    return ofono_object_proxy(ofono_simmgr_object(self));
+}
+
+static
+void
+ofono_simmgr_proxy_created(
+    OfonoObject* object,
+    OFONO_OBJECT_PROXY* proxy) {
+
+#if 0
+    OfonoSimMgr* self = OFONO_SIMMGR(object);
+    OfonoSimMgrPriv* priv = self->priv;
+#endif
+    //GDEBUG("%s: %sattached", priv->name, self->attached ? "" : "not ");
+
+    // XXX: MW: this probably stores the proxy somewhere in the opaque object?
+    OFONO_OBJECT_CLASS(SUPER_CLASS)->fn_proxy_created(object, proxy);
+
+    return;
+}
 
 OfonoSimMgr*
 ofono_simmgr_new(
@@ -133,6 +160,160 @@ ofono_simmgr_unref(
     if (G_LIKELY(self)) {
         g_object_unref(OFONO_SIMMGR(self));
     }
+}
+
+
+// TODO: const gchar* ?
+// TODO: return if operation succeeded ?
+gboolean
+ofono_simmgr_enter_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin)
+{
+    gboolean res = FALSE;
+    GError* err = NULL;
+
+    // TODO: check if proxy is valid? (perhaps use same methods as
+    // gofono_connmgr)
+
+    OrgOfonoSimManager* mgr = (OrgOfonoSimManager*)ofono_simmgr_proxy(self);
+
+    res = org_ofono_sim_manager_call_enter_pin_sync(
+            mgr,
+            type,
+            pin,
+            NULL /* XXX: cancellable */,
+            &err);
+
+    if (err != NULL) {
+        GERR("ofono_simmgr_enter_pin: %s", GERRMSG(err));
+        g_error_free(err);
+        return res;
+    }
+
+    return res;
+}
+
+// TODO: indent properly
+gboolean ofono_simmgr_change_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* oldpin,
+    const gchar* newpin)
+{
+    gboolean res = FALSE;
+    GError* err = NULL;
+
+    // TODO: check if proxy is valid? (perhaps use same methods as
+    // gofono_connmgr)
+
+    OrgOfonoSimManager* mgr = (OrgOfonoSimManager*)ofono_simmgr_proxy(self);
+
+    res = org_ofono_sim_manager_call_change_pin_sync(
+            mgr,
+            type,
+            oldpin,
+            newpin,
+            NULL /* XXX: cancellable */,
+            &err);
+
+    if (err != NULL) {
+        GERR("ofono_simmgr_change_pin: %s", GERRMSG(err));
+        g_error_free(err);
+        return res;
+    }
+
+    return res;
+}
+
+gboolean ofono_simmgr_reset_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* puk,
+    const gchar* newpin)
+{
+    gboolean res = FALSE;
+    GError* err = NULL;
+
+    // TODO: check if proxy is valid? (perhaps use same methods as
+    // gofono_connmgr)
+
+    OrgOfonoSimManager* mgr = (OrgOfonoSimManager*)ofono_simmgr_proxy(self);
+
+    res = org_ofono_sim_manager_call_reset_pin_sync(
+            mgr,
+            type,
+            puk,
+            newpin,
+            NULL /* XXX: cancellable */,
+            &err);
+
+    if (err != NULL) {
+        GERR("ofono_simmgr_reset_pin: %s", GERRMSG(err));
+        g_error_free(err);
+        return res;
+    }
+
+    return res;
+}
+
+gboolean ofono_simmgr_lock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin)
+{
+    gboolean res = FALSE;
+    GError* err = NULL;
+
+    // TODO: check if proxy is valid? (perhaps use same methods as
+    // gofono_connmgr)
+
+    OrgOfonoSimManager* mgr = (OrgOfonoSimManager*)ofono_simmgr_proxy(self);
+
+    res = org_ofono_sim_manager_call_lock_pin_sync(
+            mgr,
+            type,
+            pin,
+            NULL /* XXX: cancellable */,
+            &err);
+
+    if (err != NULL) {
+        GERR("ofono_simmgr_lock_pin: %s", GERRMSG(err));
+        g_error_free(err);
+        return res;
+    }
+
+    return res;
+}
+
+gboolean ofono_simmgr_unlock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin)
+{
+    gboolean res = FALSE;
+    GError* err = NULL;
+
+    // TODO: check if proxy is valid? (perhaps use same methods as
+    // gofono_connmgr)
+
+    OrgOfonoSimManager* mgr = (OrgOfonoSimManager*)ofono_simmgr_proxy(self);
+
+    res = org_ofono_sim_manager_call_unlock_pin_sync(
+            mgr,
+            type,
+            pin,
+            NULL /* XXX: cancellable */,
+            &err);
+
+    if (err != NULL) {
+        GERR("ofono_simmgr_unlock_pin: %s", GERRMSG(err));
+        g_error_free(err);
+        return res;
+    }
+
+    return res;
 }
 
 gulong
@@ -299,7 +480,7 @@ ofono_simmgr_finalize(
     g_free(priv->mcc);
     g_free(priv->mnc);
     g_free(priv->spn);
-    G_OBJECT_CLASS(ofono_simmgr_parent_class)->finalize(object);
+    G_OBJECT_CLASS(SUPER_CLASS)->finalize(object);
 }
 
 /**
@@ -326,9 +507,11 @@ ofono_simmgr_class_init(
         SIMMGR_DEFINE_PROPERTY_ENUM(PIN_REQUIRED,pin_required)
     };
 
+    GObjectClass* object_class = G_OBJECT_CLASS(klass);
     OfonoObjectClass* ofono = &klass->object;
-    G_OBJECT_CLASS(klass)->finalize = ofono_simmgr_finalize;
+    object_class->finalize = ofono_simmgr_finalize;
     g_type_class_add_private(klass, sizeof(OfonoSimMgrPriv));
+    ofono->fn_proxy_created = ofono_simmgr_proxy_created;
     ofono->properties = ofono_simmgr_properties;
     ofono->nproperties = G_N_ELEMENTS(ofono_simmgr_properties);
     OFONO_OBJECT_CLASS_SET_PROXY_CALLBACKS(ofono, org_ofono_sim_manager);
