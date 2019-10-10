@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2014-2017 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2019 Open Mobile Platform LLC.
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +14,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of Jolla Ltd nor the names of its contributors may
- *      be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived from
+ *      this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -83,6 +84,7 @@ struct ofono_connctx_priv {
     CONNCTX_ACTION current_action;
     guint retry_id;
     guint retry_count;
+    char* ifname;
     char* apn;
     char* name;
     char* username;
@@ -950,13 +952,13 @@ ofono_connctx_property_settings_reset(
     OfonoConnCtxPriv* priv = self->priv;
     OfonoConnCtxSettingsPriv* settings = CONNCTX_SETTINGS_PRIV_P(priv,prop);
     gboolean ifname_changed = FALSE;
-    if (self->ifname == settings->ifname) {
-        self->ifname = (settings == &priv->settings) ? 
-            priv->ipv6_settings.ifname : priv->settings.ifname;
-        if (g_strcmp0(self->ifname, settings->ifname)) {
-            GDEBUG("Interface: %s", self->ifname ? self->ifname : "<none>");
-            ifname_changed = TRUE;
-        }
+    const char* ifname = (settings == &priv->settings) ?
+        priv->ipv6_settings.ifname : priv->settings.ifname;
+    if (g_strcmp0(priv->ifname, ifname)) {
+        GDEBUG("Interface: %s", ifname ? ifname : "<none>");
+        g_free(priv->ifname);
+        self->ifname = priv->ifname = g_strdup(ifname);
+        ifname_changed = TRUE;
     }
     ofono_connctx_settings_clear(CONNCTX_SETTINGS_PRIV_P(self->priv,prop));
     CONNCTX_SETTINGS_PUB(self,prop) = NULL;
@@ -1053,14 +1055,9 @@ ofono_connctx_property_settings_apply(
         priv->ipv6_settings.ifname;
     if (g_strcmp0(self->ifname, ifname)) {
         GDEBUG("Interface: %s", ifname ? ifname : "<none>");
-        self->ifname = ifname;
+        g_free(priv->ifname);
+        self->ifname = priv->ifname = g_strdup(ifname);
         CONNCTX_SIGNAL_EMIT(self, INTERFACE);
-    } else {
-        /*
-         * In any case update the public pointer because it may point to the
-         * string which ofono_connctx_settings_clear is about to deallocate
-         */
-        self->ifname = ifname;
     }
 
     ofono_connctx_settings_clear(&old);
@@ -1162,6 +1159,7 @@ ofono_connctx_finalize(
 {
     OfonoConnCtx* self = OFONO_CONNCTX(object);
     OfonoConnCtxPriv* priv = self->priv;
+    g_free(priv->ifname);
     g_free(priv->apn);
     g_free(priv->name);
     g_free(priv->username);
