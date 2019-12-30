@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2017 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of Jolla Ltd nor the names of its contributors may
- *      be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -97,6 +97,13 @@ OFONO_INLINE OfonoObject* ofono_object_check(OfonoObject* obj) { return obj; }
 #endif
 
 /* Forward declarations */
+
+static
+void
+ofono_object_apply_properties(
+    OfonoObject* self,
+    GVariant* dictionary);
+
 static
 gboolean
 ofono_object_get_properties_retry(
@@ -351,36 +358,6 @@ ofono_object_cancel_get_properties(
 }
 
 static
-void
-ofono_object_start_get_properties(
-    OfonoObject* self)
-{
-    OfonoObjectPriv* priv = self->priv;
-    OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
-    GASSERT(priv->proxy);
-    if (klass->fn_proxy_call_get_properties) {
-        OfonoObjectGetPropertiesCall* call;
-
-        call = g_slice_new0(OfonoObjectGetPropertiesCall);
-        call->cancel = g_cancellable_new();
-        call->object = self;
-        g_object_ref(call->proxy = priv->proxy);
-        call->fn_finish = klass->fn_proxy_call_get_properties_finish;
-        GASSERT(call->fn_finish);
-
-        GASSERT(priv->property_changed_signal_id);
-        ofono_object_cancel_get_properties(self);
-        priv->get_properties_ok = FALSE;
-        priv->get_properties_pending = call;
-        klass->fn_proxy_call_get_properties(priv->proxy, call->cancel,
-            ofono_object_setup_finished, call);
-    } else {
-        /* No properties to query */
-        priv->get_properties_ok = TRUE;
-    }
-}
-
-static
 gboolean
 ofono_object_get_properties_retry(
     gpointer data)
@@ -486,7 +463,7 @@ ofono_object_pending_call_finished(
 }
 
 static
-void
+const OfonoObjectProperty*
 ofono_object_apply_property_r(
     OfonoObject* self,
     OfonoObjectClass* klass,
@@ -499,53 +476,138 @@ ofono_object_apply_property_r(
          i<klass->nproperties;
          i++, property++) {
         if (!strcmp(property->name, name)) {
-            property->fn_apply(self, property, value);
-            return;
+            /* Returning OfonoObjectProperty* only if it's changed */
+            return property->fn_apply(self, property, value) ? property : NULL;
         }
     }
     if (klass != ofono_object_class) {
-        ofono_object_apply_property_r(self, OFONO_OBJECT_CLASS(
+        return ofono_object_apply_property_r(self, OFONO_OBJECT_CLASS(
             g_type_class_peek_parent(klass)), name, value);
+    }
+    return NULL;
+}
+
+static
+const OfonoObjectProperty*
+ofono_object_apply_property(
+    OfonoObject* self,
+    const char* name,
+    GVariant* value)
+{
+    return ofono_object_apply_property_r(self, OFONO_OBJECT_GET_CLASS(self),
+        name, value);
+}
+
+static
+void
+ofono_object_emit_property_change_signals(
+    OfonoObject* self,
+    GPtrArray* plist)
+{
+    guint i;
+    for (i = 0; i < plist->len; i++) {
+        const OfonoObjectProperty* property = plist->pdata[i];
+        GVariant* value = NULL;
+        ofono_object_emit_property_changed_signal(self, property);
+        if (property->fn_value) {
+            value = property->fn_value(self, property);
+        }
+        if (value) {
+            GQuark detail = g_quark_from_string(property->name);
+            g_variant_take_ref(value);
+            g_signal_emit(self, ofono_object_signals
+                [OFONO_OBJECT_SIGNAL_PROPERTY_CHANGED], detail,
+                property->name, value);
+            g_variant_unref(value);
+        }
     }
 }
 
 static
 void
-ofono_object_apply_property(
+ofono_object_apply_properties(
     OfonoObject* self,
-    const char* name,
-    GVariant* v)
+    GVariant* dictionary)
 {
-    ofono_object_apply_property_r(self, OFONO_OBJECT_GET_CLASS(self), name, v);
+    OfonoObjectPriv* priv = self->priv;
+    if (G_LIKELY(dictionary)) {
+        GVariantIter it;
+        GVariant* entry;
+        GPtrArray* plist = NULL;
+        GASSERT(g_variant_is_of_type(dictionary, G_VARIANT_TYPE("a{s*}")) ||
+                g_variant_is_of_type(dictionary, G_VARIANT_TYPE ("a{o*}")));
+        for (g_variant_iter_init(&it, dictionary);
+             (entry = g_variant_iter_next_value(&it)) != NULL;
+             g_variant_unref(entry)) {
+            const OfonoObjectProperty* property;
+            GVariant* key = g_variant_get_child_value(entry, 0);
+            GVariant* value = g_variant_get_child_value(entry, 1);
+            const char* name = g_variant_get_string(key, NULL);
+
+            if (g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
+                GVariant* tmp = g_variant_get_variant(value);
+                g_variant_unref(value);
+                value = tmp;
+            }
+
+            g_hash_table_replace(priv->properties, g_strdup(name), value);
+            property = ofono_object_apply_property(self, name, value);
+            if (property) {
+                /* Property has changed */
+                if (!plist) {
+                    plist = g_ptr_array_new();
+                }
+                g_ptr_array_add(plist, (gpointer) property);
+            }
+
+            /* Hash table keeps the value reference */
+            g_variant_unref(key);
+        }
+        /* Emit signals after all properties have been updated */
+        if (plist) {
+            ofono_object_emit_property_change_signals(self, plist);
+            g_ptr_array_free(plist, TRUE);
+        }
+    }
 }
 
 static
-void
+GPtrArray*
 ofono_object_reset_properties_r(
     OfonoObject* self,
-    OfonoObjectClass* klass)
+    OfonoObjectClass* klass,
+    GPtrArray* plist)
 {
     guint i;
     const OfonoObjectProperty* property;
     for (i=0, property=klass->properties;
          i<klass->nproperties;
          i++, property++) {
-        if (property->fn_reset) {
-            property->fn_reset(self, property);
+        if (property->fn_apply(self, property, NULL)) {
+            /* Property has changed */
+            if (!plist) {
+                plist = g_ptr_array_new();
+            }
+            g_ptr_array_add(plist, (gpointer) property);
         }
     }
     if (klass != ofono_object_class) {
-        ofono_object_reset_properties_r(self, OFONO_OBJECT_CLASS(
-            g_type_class_peek_parent(klass)));
+        plist = ofono_object_reset_properties_r(self, OFONO_OBJECT_CLASS(
+            g_type_class_peek_parent(klass)), plist);
     }
+    return plist;
 }
 
-static
 void
 ofono_object_reset_properties(
     OfonoObject* self)
 {
-    ofono_object_reset_properties_r(self, OFONO_OBJECT_GET_CLASS(self));
+    GPtrArray* plist = ofono_object_reset_properties_r(self,
+        OFONO_OBJECT_GET_CLASS(self), NULL);
+    if (plist) {
+        ofono_object_emit_property_change_signals(self, plist);
+        g_ptr_array_free(plist, TRUE);
+    }
 }
 
 static
@@ -559,8 +621,9 @@ ofono_object_property_changed(
     OfonoObject* self = OFONO_OBJECT(data);
     OfonoObjectPriv* priv = self->priv;
     GQuark detail = g_quark_from_string(name);
+    const OfonoObjectProperty* changed;
 
-    /* Hash table keeps the value reference */
+    /* Hash table holds the value reference */
     GVariant* value = (g_variant_is_of_type(variant, G_VARIANT_TYPE_VARIANT)) ?
         g_variant_get_variant(variant) : g_variant_ref(variant);
     g_hash_table_replace(priv->properties, g_strdup(name), value);
@@ -574,9 +637,12 @@ ofono_object_property_changed(
 #endif /* GUTIL_LOG_VERBOSE */
 
     g_variant_ref(value);
-    ofono_object_apply_property(self, name, value);
-    g_signal_emit(self, ofono_object_signals[
-        OFONO_OBJECT_SIGNAL_PROPERTY_CHANGED], detail, name, value);
+    changed = ofono_object_apply_property(self, name, value);
+    if (changed) {
+        ofono_object_emit_property_changed_signal(self, changed);
+        g_signal_emit(self, ofono_object_signals
+            [OFONO_OBJECT_SIGNAL_PROPERTY_CHANGED], detail, name, value);
+    }
     g_variant_unref(value);
 }
 
@@ -687,36 +753,37 @@ ofono_object_update_valid(
 }
 
 void
-ofono_object_apply_properties(
+ofono_object_query_properties(
     OfonoObject* self,
-    GVariant* dictionary)
+    gboolean force_retry)
 {
     OfonoObjectPriv* priv = self->priv;
-    if (G_LIKELY(dictionary)) {
-        GASSERT(g_variant_is_of_type(dictionary, G_VARIANT_TYPE("a{s*}")) ||
-                g_variant_is_of_type(dictionary, G_VARIANT_TYPE ("a{o*}")));
-        GVariantIter it;
-        GVariant* entry;
-        for (g_variant_iter_init(&it, dictionary);
-             (entry = g_variant_iter_next_value(&it)) != NULL;
-             g_variant_unref(entry)) {
-            GVariant* key = g_variant_get_child_value(entry, 0);
-            GVariant* value = g_variant_get_child_value(entry, 1);
-            const char* name = g_variant_get_string(key, NULL);
-            if (g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
-                GVariant* tmp = g_variant_get_variant(value);
-                g_variant_unref(value);
-                value = tmp;
+    GASSERT(priv->proxy);
+    if (priv->proxy) {
+        OfonoObjectClass* klass = OFONO_OBJECT_GET_CLASS(self);
+        if (klass->fn_proxy_call_get_properties) {
+            if (force_retry || !priv->get_properties_pending) {
+                OfonoObjectGetPropertiesCall* call;
+
+                call = g_slice_new0(OfonoObjectGetPropertiesCall);
+                call->cancel = g_cancellable_new();
+                call->object = self;
+                g_object_ref(call->proxy = priv->proxy);
+                call->fn_finish = klass->fn_proxy_call_get_properties_finish;
+                GASSERT(call->fn_finish);
+
+                /* Property change handler must be set up by now */
+                GASSERT(priv->property_changed_signal_id);
+                ofono_object_cancel_get_properties(self);
+                priv->get_properties_ok = FALSE;
+                priv->get_properties_pending = call;
+                klass->fn_proxy_call_get_properties(priv->proxy, call->cancel,
+                    ofono_object_setup_finished, call);
             }
-
-            g_hash_table_replace(priv->properties, g_strdup(name), value);
-            ofono_object_apply_property(self, name, value);
-
-            /* Hash table keeps the value reference */
-            g_variant_unref(key);
+        } else {
+            /* No properties to query */
+            priv->get_properties_ok = TRUE;
         }
-    } else {
-        ofono_object_reset_properties(self);
     }
 }
 
@@ -729,7 +796,7 @@ ofono_object_get_properties(
     gpointer key, value;
     GVariantBuilder builder;
     GVariant* properties;
-    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
     g_hash_table_iter_init(&it, self->priv->properties);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         g_variant_builder_add(&builder, "{sv}", key, value);
@@ -1009,15 +1076,15 @@ ofono_object_wait_valid(
 #define OFONO_OBJECT_STRING_PRIV(priv,prop) G_STRUCT_MEMBER(char*, \
     priv, (prop)->off_priv)
 
-void
-ofono_object_property_boolean_reset(
+GVariant*
+ofono_object_property_boolean_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop)
 {
-    OFONO_OBJECT_BOOL(self,prop) = FALSE;
+    return g_variant_new_boolean(OFONO_OBJECT_BOOL(self,prop));
 }
 
-void
+gboolean
 ofono_object_property_boolean_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
@@ -1026,20 +1093,13 @@ ofono_object_property_boolean_apply(
     const gboolean b = value && g_variant_get_boolean(value);
     if (OFONO_OBJECT_BOOL(self,prop) != b) {
         OFONO_OBJECT_BOOL(self,prop) = b;
-        ofono_object_emit_property_changed_signal(self, prop);
+        return TRUE;
     }
-}
-
-void
-ofono_object_property_uint_reset(
-    OfonoObject* self,
-    const OfonoObjectProperty* prop)
-{
-    OFONO_OBJECT_UINT(self,prop) = 0;
+    return FALSE;
 }
 
 static
-void
+gboolean
 ofono_object_property_uint_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
@@ -1047,114 +1107,163 @@ ofono_object_property_uint_apply(
 {
     if (OFONO_OBJECT_UINT(self,prop) != value) {
         OFONO_OBJECT_UINT(self,prop) = value;
-        ofono_object_emit_property_changed_signal(self, prop);
+        return TRUE;
     }
+    return FALSE;
 }
 
-void
+GVariant*
+ofono_object_property_byte_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop)
+{
+    return g_variant_new_byte((guchar)OFONO_OBJECT_UINT(self,prop));
+}
+
+gboolean
 ofono_object_property_byte_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
-    ofono_object_property_uint_apply(self, prop, g_variant_get_byte(value));
+    return ofono_object_property_uint_apply(self, prop, value ?
+        g_variant_get_byte(value) : 0);
 }
 
-void
+GVariant*
+ofono_object_property_uint16_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop)
+{
+    return g_variant_new_uint16((guint16)OFONO_OBJECT_UINT(self,prop));
+}
+
+gboolean
 ofono_object_property_uint16_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
-    ofono_object_property_uint_apply(self, prop, g_variant_get_uint16(value));
+    return ofono_object_property_uint_apply(self, prop, value ?
+        g_variant_get_uint16(value) : 0);
 }
 
-void
+GVariant*
+ofono_object_property_uint32_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop)
+{
+    return g_variant_new_uint32(OFONO_OBJECT_UINT(self,prop));
+}
+
+gboolean
 ofono_object_property_uint32_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
-    ofono_object_property_uint_apply(self, prop, g_variant_get_uint32(value));
+    return ofono_object_property_uint_apply(self, prop, value ?
+        g_variant_get_uint32(value) : 0);
 }
 
-void
-ofono_object_property_enum_reset(
+GVariant*
+ofono_object_property_enum_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop)
 {
-    OFONO_OBJECT_INT(self,prop) = 0;
+    const OfonoNameIntMap* map = prop->ext;
+    const char* str = ofono_int_to_name(map, OFONO_OBJECT_INT(self,prop));
+
+    return g_variant_new_string(str ? str : "");
 }
 
-void
+gboolean
 ofono_object_property_enum_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
-    const OfonoNameIntMap* map = prop->ext;
-    int i = ofono_name_to_int(map, g_variant_get_string(value, NULL));
+    int i = -1;
+    if (value) {
+        const OfonoNameIntMap* map = prop->ext;
+        i = ofono_name_to_int(map, g_variant_get_string(value, NULL));
+    }
     if (OFONO_OBJECT_INT(self,prop) != i) {
         OFONO_OBJECT_INT(self,prop) = i;
-        ofono_object_emit_property_changed_signal(self, prop);
+        return TRUE;
     }
+    return FALSE;
 }
 
-void
-ofono_object_property_string_array_reset(
+GVariant*
+ofono_object_property_string_array_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop)
 {
-    if (OFONO_OBJECT_PTR_ARRAY(self,prop)) {
-        g_ptr_array_unref(OFONO_OBJECT_PTR_ARRAY(self,prop));
-        OFONO_OBJECT_PTR_ARRAY(self,prop) = NULL;
+    GVariantBuilder vb;
+    GPtrArray* array = OFONO_OBJECT_PTR_ARRAY(self,prop);
+    g_variant_builder_init(&vb, G_VARIANT_TYPE_STRING_ARRAY);
+    if (array) {
+        guint i;
+        for (i = 0; i < array->len; i++) {
+            const char* str = array->pdata[i];
+            if (str) {
+                g_variant_builder_add_value(&vb, g_variant_new_string(str));
+            }
+        }
     }
+    return g_variant_builder_end(&vb);
 }
 
-void
+gboolean
 ofono_object_property_string_array_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
-    GVariant* v)
+    GVariant* value)
 {
-    GPtrArray* a = ofono_string_array_sort(ofono_string_array_from_variant(v));
-    if (!ofono_string_array_equal(a, OFONO_OBJECT_PTR_ARRAY(self,prop))) {
+    GPtrArray* array = NULL;
+    if (value) {
+        array = ofono_string_array_sort(ofono_string_array_from_variant(value));
+    }
+    if (!ofono_string_array_equal(array, OFONO_OBJECT_PTR_ARRAY(self,prop))) {
         if (OFONO_OBJECT_PTR_ARRAY(self,prop)) {
             g_ptr_array_unref(OFONO_OBJECT_PTR_ARRAY(self,prop));
         }
-        OFONO_OBJECT_PTR_ARRAY(self,prop) = a;
-        ofono_object_emit_property_changed_signal(self, prop);
+        OFONO_OBJECT_PTR_ARRAY(self,prop) = array;
+        return TRUE;
     } else {
-        GDEBUG("%s: %s unchanged", ofono_object_name(self), prop->name);
-        g_ptr_array_unref(a);
+        GVERBOSE("%s: %s unchanged", ofono_object_name(self), prop->name);
+        if (array) {
+            g_ptr_array_unref(array);
+        }
+        return FALSE;
     }
 }
 
-void
+GVariant*
+ofono_object_property_string_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop)
+{
+    const char* str = OFONO_OBJECT_STRING_PUB(self,prop);
+    return g_variant_new_string(str ? str : "");
+}
+
+gboolean
 ofono_object_property_string_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
     void* priv = prop->fn_priv(self, prop);
-    const char* str = g_variant_get_string(value, NULL);
+    const char* str = value ? g_variant_get_string(value, NULL) : NULL;
     if (g_strcmp0(OFONO_OBJECT_STRING_PRIV(priv,prop), str)) {
         g_free(OFONO_OBJECT_STRING_PRIV(priv,prop));
         OFONO_OBJECT_STRING_PUB(self,prop) =
         OFONO_OBJECT_STRING_PRIV(priv,prop) = g_strdup(str);
-        ofono_object_emit_property_changed_signal(self, prop);
+        return TRUE;
     }
-}
-
-void
-ofono_object_property_string_reset(
-    OfonoObject* self,
-    const OfonoObjectProperty* prop)
-{
-    void* priv = prop->fn_priv(self, prop);
-    g_free(OFONO_OBJECT_STRING_PRIV(priv,prop));
-    OFONO_OBJECT_STRING_PUB(self,prop) =
-    OFONO_OBJECT_STRING_PRIV(priv,prop) = NULL;
+    return FALSE;
 }
 
 /*==========================================================================*
@@ -1200,8 +1309,7 @@ ofono_object_ready_changed(
     GASSERT(priv->ready == ready);
     if (priv->ready) {
         if (priv->proxy) {
-            ofono_object_cancel_get_properties(self);
-            ofono_object_start_get_properties(self);
+            ofono_object_query_properties(self, TRUE);
             ofono_object_update_valid(self);
         }
     } else {
@@ -1245,7 +1353,6 @@ ofono_object_dispose(
     OfonoObject* self = OFONO_OBJECT(object);
     OfonoObjectPriv* priv = self->priv;
     ofono_object_cancel_get_properties(self);
-    ofono_object_reset_properties(self);
     if (priv->proxy) {
         gutil_disconnect_handlers(priv->proxy,
             &priv->property_changed_signal_id, 1);

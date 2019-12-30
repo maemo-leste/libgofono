@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -192,9 +192,6 @@ ofono_simmgr_remove_handler(
  * Properties
  *==========================================================================*/
 
-#define SIMMGR_DEFINE_PROPERTY_BOOL(NAME,var) \
-    OFONO_OBJECT_DEFINE_PROPERTY_BOOL(SIMMGR,NAME,OfonoSimMgr,var)
-
 #define SIMMGR_DEFINE_PROPERTY_STRING(NAME,var) \
     OFONO_OBJECT_DEFINE_PROPERTY_STRING(SIMMGR,simmgr,NAME,OfonoSimMgr,var)
 
@@ -205,6 +202,26 @@ ofono_simmgr_property_priv(
     const OfonoObjectProperty* prop)
 {
     return OFONO_SIMMGR(object)->priv;
+}
+
+static
+gboolean
+ofono_simmgr_property_present_apply(
+    OfonoObject* object,
+    const OfonoObjectProperty* prop,
+    GVariant* value)
+{
+    if (ofono_object_property_boolean_apply(object, prop, value)) {
+        if (OFONO_SIMMGR(object)->present) {
+            GDEBUG("SIM %s is present", ofono_object_name(object));
+            ofono_object_query_properties(object, FALSE);
+        } else {
+            GDEBUG("SIM %s is not present", ofono_object_name(object));
+            ofono_object_reset_properties(object);
+        }
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /*==========================================================================*
@@ -249,7 +266,14 @@ ofono_simmgr_class_init(
     OfonoSimMgrClass* klass)
 {
     static OfonoObjectProperty ofono_simmgr_properties[] = {
-        SIMMGR_DEFINE_PROPERTY_BOOL(PRESENT,present),
+        {   /* "Present" property is a special case */
+            OFONO_SIMMGR_PROPERTY_PRESENT,
+            SIMMGR_SIGNAL_PRESENT_CHANGED_NAME, 0, NULL,
+            ofono_object_property_boolean_value,
+            ofono_simmgr_property_present_apply,
+            G_STRUCT_OFFSET(OfonoSimMgr,present),
+            OFONO_OBJECT_OFFSET_NONE, NULL
+        },
         SIMMGR_DEFINE_PROPERTY_STRING(IMSI,imsi),
         SIMMGR_DEFINE_PROPERTY_STRING(MCC,mcc),
         SIMMGR_DEFINE_PROPERTY_STRING(MNC,mnc),

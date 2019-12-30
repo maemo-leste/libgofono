@@ -248,6 +248,10 @@ ofono_connctx_settings_decode(
     memset(settings, 0, sizeof(*settings));
     ofono_connctx_settings_init(settings);
 
+    if (!dict) {
+        return FALSE;
+    }
+
     /* Interface */
     s = NULL;
     if (g_variant_lookup(dict, OFONO_CONNCTX_SETTINGS_INTERFACE, "&s", &s) &&
@@ -927,15 +931,18 @@ ofono_connctx_property_priv(
 
 #if GUTIL_LOG_DEBUG
 static
-void
+gboolean
 ofono_connctx_property_active_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value)
 {
-    GDEBUG("Context %s is %sactive", object->path,
-        g_variant_get_boolean(value) ? "" : "not ");
-    ofono_object_property_boolean_apply(object, prop, value);
+    if (ofono_object_property_boolean_apply(object, prop, value)) {
+        GDEBUG("Context %s is %sactive", object->path,
+            (value && g_variant_get_boolean(value)) ? "" : "not ");
+        return TRUE;
+    }
+    return FALSE;
 }
 #else
 #  define ofono_connctx_property_active_apply \
@@ -943,32 +950,7 @@ ofono_connctx_property_active_apply(
 #endif
 
 static
-void
-ofono_connctx_property_settings_reset(
-    OfonoObject* object,
-    const OfonoObjectProperty* prop)
-{
-    OfonoConnCtx* self = OFONO_CONNCTX(object);
-    OfonoConnCtxPriv* priv = self->priv;
-    OfonoConnCtxSettingsPriv* settings = CONNCTX_SETTINGS_PRIV_P(priv,prop);
-    gboolean ifname_changed = FALSE;
-    const char* ifname = (settings == &priv->settings) ?
-        priv->ipv6_settings.ifname : priv->settings.ifname;
-    if (g_strcmp0(priv->ifname, ifname)) {
-        GDEBUG("Interface: %s", ifname ? ifname : "<none>");
-        g_free(priv->ifname);
-        self->ifname = priv->ifname = g_strdup(ifname);
-        ifname_changed = TRUE;
-    }
-    ofono_connctx_settings_clear(CONNCTX_SETTINGS_PRIV_P(self->priv,prop));
-    CONNCTX_SETTINGS_PUB(self,prop) = NULL;
-    if (ifname_changed) {
-        CONNCTX_SIGNAL_EMIT(self, INTERFACE);
-    }
-}
-
-static
-void
+gboolean
 ofono_connctx_property_settings_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
@@ -1061,8 +1043,23 @@ ofono_connctx_property_settings_apply(
     }
 
     ofono_connctx_settings_clear(&old);
-    if (changed) {
-        ofono_object_emit_property_changed_signal(object, prop);
+    return changed;
+}
+
+static
+GVariant*
+ofono_connctx_property_settings_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop)
+{
+    if (CONNCTX_SETTINGS_PUB(self,prop)) {
+        /* This part is not really necessary, ignore it for now */
+        return NULL;
+    } else {
+        /* Is there a better way to create an empty a{sv} container? */
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
+        return g_variant_builder_end(&builder);
     }
 }
 
@@ -1195,7 +1192,7 @@ ofono_connctx_class_init(
             OFONO_CONNCTX_PROPERTY_ACTIVE,
             CONNCTX_SIGNAL_ACTIVE_CHANGED_NAME, 0,
             ofono_connctx_property_priv,
-            ofono_object_property_boolean_reset,
+            ofono_object_property_boolean_value,
             ofono_connctx_property_active_apply,
             G_STRUCT_OFFSET(OfonoConnCtx,active),
             OFONO_OBJECT_OFFSET_NONE
@@ -1203,7 +1200,7 @@ ofono_connctx_class_init(
             OFONO_CONNCTX_PROPERTY_SETTINGS,
             CONNCTX_SIGNAL_SETTINGS_CHANGED_NAME, 0,
             ofono_connctx_property_priv,
-            ofono_connctx_property_settings_reset,
+            ofono_connctx_property_settings_value,
             ofono_connctx_property_settings_apply,
             G_STRUCT_OFFSET(OfonoConnCtx,settings),
             G_STRUCT_OFFSET(OfonoConnCtxPriv,settings)
@@ -1211,7 +1208,7 @@ ofono_connctx_class_init(
             OFONO_CONNCTX_PROPERTY_IPV6_SETTINGS,
             CONNCTX_SIGNAL_IPV6_SETTINGS_CHANGED_NAME, 0,
             ofono_connctx_property_priv,
-            ofono_connctx_property_settings_reset,
+            ofono_connctx_property_settings_value,
             ofono_connctx_property_settings_apply,
             G_STRUCT_OFFSET(OfonoConnCtx,ipv6_settings),
             G_STRUCT_OFFSET(OfonoConnCtxPriv,ipv6_settings)

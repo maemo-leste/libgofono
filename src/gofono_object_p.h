@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -110,10 +110,9 @@ struct ofono_object_property {
     const char* name;
     const char* signal_name;
     guint signal;
-    void* (*fn_priv)(OfonoObject* object, const OfonoObjectProperty* property);
-    void (*fn_reset)(OfonoObject* object, const OfonoObjectProperty* property);
-    void (*fn_apply)(OfonoObject* object, const OfonoObjectProperty* property,
-        GVariant* value);
+    void* (*fn_priv)(OfonoObject*, const OfonoObjectProperty*);
+    GVariant* (*fn_value)(OfonoObject*, const OfonoObjectProperty*);
+    gboolean (*fn_apply)(OfonoObject*, const OfonoObjectProperty*, GVariant*);
     goffset off_pub;
     goffset off_priv;
     const void* ext;
@@ -152,11 +151,6 @@ ofono_object_initialize(
     const char* intf,
     const char* path);
 
-void
-ofono_object_apply_properties(
-    OfonoObject* self,
-    GVariant* properties);
-
 GVariant*
 ofono_object_get_properties(
     OfonoObject* self);
@@ -194,74 +188,93 @@ ofono_object_pending_call_finished(
     GAsyncResult* result,
     gpointer data);
 
-/* Properties */
+void
+ofono_object_query_properties(
+    OfonoObject* object,
+    gboolean force_retry);
 
 void
-ofono_object_property_boolean_reset(
+ofono_object_reset_properties(
+    OfonoObject* object);
+
+/* Properties */
+
+GVariant*
+ofono_object_property_boolean_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop);
 
-void
+gboolean
 ofono_object_property_boolean_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
-ofono_object_property_uint_reset(
+GVariant*
+ofono_object_property_byte_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop);
 
-void
+gboolean
 ofono_object_property_byte_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
+GVariant*
+ofono_object_property_uint16_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop);
+
+gboolean
 ofono_object_property_uint16_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
+GVariant*
+ofono_object_property_uint32_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop);
+
+gboolean
 ofono_object_property_uint32_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
-ofono_object_property_enum_reset(
+GVariant*
+ofono_object_property_enum_value(
     OfonoObject* self,
     const OfonoObjectProperty* prop);
 
-void
+gboolean
 ofono_object_property_enum_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
-ofono_object_property_string_array_reset(
+GVariant*
+ofono_object_property_string_array_value(
     OfonoObject* object,
     const OfonoObjectProperty* prop);
 
-void
+gboolean
 ofono_object_property_string_array_apply(
     OfonoObject* object,
     const OfonoObjectProperty* prop,
     GVariant* value);
 
-void
+GVariant*
+ofono_object_property_string_value(
+    OfonoObject* self,
+    const OfonoObjectProperty* prop);
+
+gboolean
 ofono_object_property_string_apply(
     OfonoObject* self,
     const OfonoObjectProperty* prop,
     GVariant* value);
-
-void
-ofono_object_property_string_reset(
-    OfonoObject* self,
-    const OfonoObjectProperty* prop);
 
 OFONO_INLINE void
 ofono_object_emit_property_changed_signal(OfonoObject* object,
@@ -269,55 +282,51 @@ ofono_object_emit_property_changed_signal(OfonoObject* object,
     { if (property->signal) g_signal_emit(object, property->signal, 0); }
 
 /* NOTE: public fields for both BYTE and UINT16 are assumed to be guint */
-#define ofono_object_property_byte_reset ofono_object_property_uint_reset
-#define ofono_object_property_uint16_reset ofono_object_property_uint_reset
-#define ofono_object_property_uint32_reset ofono_object_property_uint_reset
-
 #define OFONO_OBJECT_OFFSET_NONE ((goffset)-1)
 
 #define OFONO_OBJECT_DEFINE_PROPERTY_BOOL(PREFIX,NAME,T,var) {          \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_boolean_reset,                                \
+    ofono_object_property_boolean_value,                                \
     ofono_object_property_boolean_apply,                                \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, NULL }
 
 #define OFONO_OBJECT_DEFINE_PROPERTY_BYTE(PREFIX,NAME,T,var) {          \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_byte_reset,                                   \
+    ofono_object_property_byte_value,                                   \
     ofono_object_property_byte_apply,                                   \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, NULL }
 
 #define OFONO_OBJECT_DEFINE_PROPERTY_UINT16(PREFIX,NAME,T,var) {        \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_uint16_reset,                                 \
+    ofono_object_property_uint16_value,                                 \
     ofono_object_property_uint16_apply,                                 \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, NULL }
 
 #define OFONO_OBJECT_DEFINE_PROPERTY_UINT32(PREFIX,NAME,T,var) {        \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_uint32_reset,                                 \
+    ofono_object_property_uint32_value,                                 \
     ofono_object_property_uint32_apply,                                 \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, NULL }
 
 /* Last parameter must point to OfonoNameIntMap. Also, the size of the
  * enum must equal sizeof(int) and it's not always the case. The most
  * portable way to ensure that is to have -1 as one of the enum values.
- * The reset function resets the enum value to zero. */
+ * The default enum value is zero. */
 #define OFONO_OBJECT_DEFINE_PROPERTY_ENUM(PREFIX,NAME,T,var,map) {      \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_enum_reset,                                   \
+    ofono_object_property_enum_value,                                   \
     ofono_object_property_enum_apply,                                   \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, map }
 
 #define OFONO_OBJECT_DEFINE_PROPERTY_STRING_ARRAY(PREFIX,NAME,T,var) {  \
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0, NULL,                     \
-    ofono_object_property_string_array_reset,                           \
+    ofono_object_property_string_array_value,                           \
     ofono_object_property_string_array_apply,                           \
     G_STRUCT_OFFSET(T,var), OFONO_OBJECT_OFFSET_NONE, NULL }
 
@@ -325,7 +334,7 @@ ofono_object_emit_property_changed_signal(OfonoObject* object,
     OFONO_##PREFIX##_PROPERTY_##NAME,                                   \
     PREFIX##_SIGNAL_##NAME##_CHANGED_NAME, 0,                           \
     ofono_##prefix##_property_priv,                                     \
-    ofono_object_property_string_reset,                                 \
+    ofono_object_property_string_value,                                 \
     ofono_object_property_string_apply,                                 \
     G_STRUCT_OFFSET(T,var), G_STRUCT_OFFSET(T##Priv,var), NULL}
 
