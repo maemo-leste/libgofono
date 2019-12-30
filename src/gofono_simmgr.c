@@ -33,6 +33,7 @@
 #include "gofono_simmgr.h"
 #include "gofono_modem_p.h"
 #include "gofono_names.h"
+#include "gofono_util.h"
 #include "gofono_log.h"
 
 /* Generated headers */
@@ -52,11 +53,38 @@ struct ofono_simmgr_priv {
 typedef OfonoModemInterfaceClass OfonoSimMgrClass;
 G_DEFINE_TYPE(OfonoSimMgr, ofono_simmgr, OFONO_TYPE_MODEM_INTERFACE)
 
-#define SIMMGR_SIGNAL_PRESENT_CHANGED_NAME "present-changed"
-#define SIMMGR_SIGNAL_IMSI_CHANGED_NAME    "imsi-changed"
-#define SIMMGR_SIGNAL_MCC_CHANGED_NAME     "mcc-changed"
-#define SIMMGR_SIGNAL_MNC_CHANGED_NAME     "mnc-changed"
-#define SIMMGR_SIGNAL_SPN_CHANGED_NAME     "spn-changed"
+#define SIMMGR_SIGNAL_PRESENT_CHANGED_NAME      "present-changed"
+#define SIMMGR_SIGNAL_IMSI_CHANGED_NAME         "imsi-changed"
+#define SIMMGR_SIGNAL_MCC_CHANGED_NAME          "mcc-changed"
+#define SIMMGR_SIGNAL_MNC_CHANGED_NAME          "mnc-changed"
+#define SIMMGR_SIGNAL_SPN_CHANGED_NAME          "spn-changed"
+#define SIMMGR_SIGNAL_PIN_REQUIRED_CHANGED_NAME "pin-required-changed"
+
+/* Enum <-> string mappings */
+static const OfonoNameIntPair ofono_simmgr_pin_required_values[] = {
+    { "none",           OFONO_SIMMGR_PIN_NONE },
+    { "pin",            OFONO_SIMMGR_PIN_PIN },
+    { "phone",          OFONO_SIMMGR_PIN_PHONE },
+    { "firstphone",     OFONO_SIMMGR_PIN_FIRSTPHONE },
+    { "pin2",           OFONO_SIMMGR_PIN_PIN2 },
+    { "network",        OFONO_SIMMGR_PIN_NETWORK },
+    { "netsub",         OFONO_SIMMGR_PIN_NETSUB },
+    { "service",        OFONO_SIMMGR_PIN_SERVICE },
+    { "corp",           OFONO_SIMMGR_PIN_CORP },
+    { "puk",            OFONO_SIMMGR_PIN_PUK },
+    { "firstphonepuk",  OFONO_SIMMGR_PIN_FIRSTPHONEPUK },
+    { "puk2",           OFONO_SIMMGR_PIN_PUK2 },
+    { "networkpuk",     OFONO_SIMMGR_PIN_NETWORKPUK },
+    { "netsubpuk",      OFONO_SIMMGR_PIN_NETSUBPUK },
+    { "servicepuk",     OFONO_SIMMGR_PIN_SERVICEPUK },
+    { "corppuk",        OFONO_SIMMGR_PIN_CORPPUK }
+};
+
+static const OfonoNameIntMap ofono_simmgr_pin_required_map = {
+    "pin required",
+    OFONO_NAME_INT_MAP_ENTRIES(ofono_simmgr_pin_required_values),
+    { NULL, OFONO_SIMMGR_PIN_UNKNOWN }
+};
 
 /*==========================================================================*
  * API
@@ -195,6 +223,12 @@ ofono_simmgr_remove_handler(
 #define SIMMGR_DEFINE_PROPERTY_STRING(NAME,var) \
     OFONO_OBJECT_DEFINE_PROPERTY_STRING(SIMMGR,simmgr,NAME,OfonoSimMgr,var)
 
+#define SIMMGR_DEFINE_PROPERTY_ENUM(NAME,var) \
+    OFONO_OBJECT_DEFINE_PROPERTY_ENUM(SIMMGR,NAME,OfonoSimMgr,var, \
+    &ofono_simmgr_##var##_map)
+
+G_STATIC_ASSERT(sizeof(OFONO_SIMMGR_PIN) == sizeof(int));
+
 static
 void*
 ofono_simmgr_property_priv(
@@ -238,6 +272,7 @@ ofono_simmgr_init(
 {
     self->priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_SIMMGR, OfonoSimMgrPriv);
+    self->pin_required = OFONO_SIMMGR_PIN_UNKNOWN;
 }
 
 /**
@@ -277,7 +312,8 @@ ofono_simmgr_class_init(
         SIMMGR_DEFINE_PROPERTY_STRING(IMSI,imsi),
         SIMMGR_DEFINE_PROPERTY_STRING(MCC,mcc),
         SIMMGR_DEFINE_PROPERTY_STRING(MNC,mnc),
-        SIMMGR_DEFINE_PROPERTY_STRING(SPN,spn)
+        SIMMGR_DEFINE_PROPERTY_STRING(SPN,spn),
+        SIMMGR_DEFINE_PROPERTY_ENUM(PIN_REQUIRED,pin_required)
     };
 
     OfonoObjectClass* ofono = &klass->object;
