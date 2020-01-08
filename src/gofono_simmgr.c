@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -33,6 +33,7 @@
 #include "gofono_simmgr.h"
 #include "gofono_modem_p.h"
 #include "gofono_names.h"
+#include "gofono_util.h"
 #include "gofono_log.h"
 
 /* Generated headers */
@@ -52,11 +53,38 @@ struct ofono_simmgr_priv {
 typedef OfonoModemInterfaceClass OfonoSimMgrClass;
 G_DEFINE_TYPE(OfonoSimMgr, ofono_simmgr, OFONO_TYPE_MODEM_INTERFACE)
 
-#define SIMMGR_SIGNAL_PRESENT_CHANGED_NAME "present-changed"
-#define SIMMGR_SIGNAL_IMSI_CHANGED_NAME    "imsi-changed"
-#define SIMMGR_SIGNAL_MCC_CHANGED_NAME     "mcc-changed"
-#define SIMMGR_SIGNAL_MNC_CHANGED_NAME     "mnc-changed"
-#define SIMMGR_SIGNAL_SPN_CHANGED_NAME     "spn-changed"
+#define SIMMGR_SIGNAL_PRESENT_CHANGED_NAME      "present-changed"
+#define SIMMGR_SIGNAL_IMSI_CHANGED_NAME         "imsi-changed"
+#define SIMMGR_SIGNAL_MCC_CHANGED_NAME          "mcc-changed"
+#define SIMMGR_SIGNAL_MNC_CHANGED_NAME          "mnc-changed"
+#define SIMMGR_SIGNAL_SPN_CHANGED_NAME          "spn-changed"
+#define SIMMGR_SIGNAL_PIN_REQUIRED_CHANGED_NAME "pin-required-changed"
+
+/* Enum <-> string mappings */
+static const OfonoNameIntPair ofono_simmgr_pin_required_values[] = {
+    { "none",           OFONO_SIMMGR_PIN_NONE },
+    { "pin",            OFONO_SIMMGR_PIN_PIN },
+    { "phone",          OFONO_SIMMGR_PIN_PHONE },
+    { "firstphone",     OFONO_SIMMGR_PIN_FIRSTPHONE },
+    { "pin2",           OFONO_SIMMGR_PIN_PIN2 },
+    { "network",        OFONO_SIMMGR_PIN_NETWORK },
+    { "netsub",         OFONO_SIMMGR_PIN_NETSUB },
+    { "service",        OFONO_SIMMGR_PIN_SERVICE },
+    { "corp",           OFONO_SIMMGR_PIN_CORP },
+    { "puk",            OFONO_SIMMGR_PIN_PUK },
+    { "firstphonepuk",  OFONO_SIMMGR_PIN_FIRSTPHONEPUK },
+    { "puk2",           OFONO_SIMMGR_PIN_PUK2 },
+    { "networkpuk",     OFONO_SIMMGR_PIN_NETWORKPUK },
+    { "netsubpuk",      OFONO_SIMMGR_PIN_NETSUBPUK },
+    { "servicepuk",     OFONO_SIMMGR_PIN_SERVICEPUK },
+    { "corppuk",        OFONO_SIMMGR_PIN_CORPPUK }
+};
+
+static const OfonoNameIntMap ofono_simmgr_pin_required_map = {
+    "pin required",
+    OFONO_NAME_INT_MAP_ENTRIES(ofono_simmgr_pin_required_values),
+    { NULL, OFONO_SIMMGR_PIN_UNKNOWN }
+};
 
 /*==========================================================================*
  * API
@@ -192,11 +220,14 @@ ofono_simmgr_remove_handler(
  * Properties
  *==========================================================================*/
 
-#define SIMMGR_DEFINE_PROPERTY_BOOL(NAME,var) \
-    OFONO_OBJECT_DEFINE_PROPERTY_BOOL(SIMMGR,NAME,OfonoSimMgr,var)
-
 #define SIMMGR_DEFINE_PROPERTY_STRING(NAME,var) \
     OFONO_OBJECT_DEFINE_PROPERTY_STRING(SIMMGR,simmgr,NAME,OfonoSimMgr,var)
+
+#define SIMMGR_DEFINE_PROPERTY_ENUM(NAME,var) \
+    OFONO_OBJECT_DEFINE_PROPERTY_ENUM(SIMMGR,NAME,OfonoSimMgr,var, \
+    &ofono_simmgr_##var##_map)
+
+G_STATIC_ASSERT(sizeof(OFONO_SIMMGR_PIN) == sizeof(int));
 
 static
 void*
@@ -205,6 +236,26 @@ ofono_simmgr_property_priv(
     const OfonoObjectProperty* prop)
 {
     return OFONO_SIMMGR(object)->priv;
+}
+
+static
+gboolean
+ofono_simmgr_property_present_apply(
+    OfonoObject* object,
+    const OfonoObjectProperty* prop,
+    GVariant* value)
+{
+    if (ofono_object_property_boolean_apply(object, prop, value)) {
+        if (OFONO_SIMMGR(object)->present) {
+            GDEBUG("SIM %s is present", ofono_object_name(object));
+            ofono_object_query_properties(object, FALSE);
+        } else {
+            GDEBUG("SIM %s is not present", ofono_object_name(object));
+            ofono_object_reset_properties(object);
+        }
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /*==========================================================================*
@@ -221,6 +272,7 @@ ofono_simmgr_init(
 {
     self->priv = G_TYPE_INSTANCE_GET_PRIVATE(self,
         OFONO_TYPE_SIMMGR, OfonoSimMgrPriv);
+    self->pin_required = OFONO_SIMMGR_PIN_UNKNOWN;
 }
 
 /**
@@ -249,11 +301,19 @@ ofono_simmgr_class_init(
     OfonoSimMgrClass* klass)
 {
     static OfonoObjectProperty ofono_simmgr_properties[] = {
-        SIMMGR_DEFINE_PROPERTY_BOOL(PRESENT,present),
+        {   /* "Present" property is a special case */
+            OFONO_SIMMGR_PROPERTY_PRESENT,
+            SIMMGR_SIGNAL_PRESENT_CHANGED_NAME, 0, NULL,
+            ofono_object_property_boolean_value,
+            ofono_simmgr_property_present_apply,
+            G_STRUCT_OFFSET(OfonoSimMgr,present),
+            OFONO_OBJECT_OFFSET_NONE, NULL
+        },
         SIMMGR_DEFINE_PROPERTY_STRING(IMSI,imsi),
         SIMMGR_DEFINE_PROPERTY_STRING(MCC,mcc),
         SIMMGR_DEFINE_PROPERTY_STRING(MNC,mnc),
-        SIMMGR_DEFINE_PROPERTY_STRING(SPN,spn)
+        SIMMGR_DEFINE_PROPERTY_STRING(SPN,spn),
+        SIMMGR_DEFINE_PROPERTY_ENUM(PIN_REQUIRED,pin_required)
     };
 
     OfonoObjectClass* ofono = &klass->object;
