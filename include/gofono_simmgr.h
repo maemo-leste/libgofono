@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2019 Jolla Ltd.
- * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2020 Jolla Ltd.
+ * Copyright (C) 2014-2020 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -146,6 +146,12 @@ ofono_simmgr_add_present_changed_handler(
     OfonoSimMgr* sim,
     OfonoSimMgrHandler handler,
     void* arg);
+
+gulong
+ofono_simmgr_add_pin_required_changed_handler(
+    OfonoSimMgr* sim,
+    OfonoSimMgrHandler handler,
+    void* arg); /* Since 2.0.8 */
 
 void
 ofono_simmgr_remove_handler(

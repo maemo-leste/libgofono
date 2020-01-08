@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2019 Jolla Ltd.
- * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2020 Jolla Ltd.
+ * Copyright (C) 2014-2020 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -204,6 +204,16 @@ ofono_simmgr_add_present_changed_handler(
 {
     return (G_LIKELY(self) && G_LIKELY(fn)) ? g_signal_connect(self,
         SIMMGR_SIGNAL_PRESENT_CHANGED_NAME, G_CALLBACK(fn), arg) : 0;
+}
+
+gulong
+ofono_simmgr_add_pin_required_changed_handler(
+    OfonoSimMgr* self,
+    OfonoSimMgrHandler fn,
+    void* arg) /* Since 2.0.8 */
+{
+    return (G_LIKELY(self) && G_LIKELY(fn)) ? g_signal_connect(self,
+        SIMMGR_SIGNAL_PIN_REQUIRED_CHANGED_NAME, G_CALLBACK(fn), arg) : 0;
 }
 
 void
