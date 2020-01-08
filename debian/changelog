@@ -1,3 +1,11 @@
+libgofono (2.0.8) unstable; urgency=low
+
+  * Reset SIM properties on removal, refresh on insertion
+  * Added support for PinRequired property
+  * Avoid overlinking
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 08 Jan 2020 13:17:34 +0200
+
 libgofono (2.0.7) unstable; urgency=low
 
   * Fixed potential use after free
