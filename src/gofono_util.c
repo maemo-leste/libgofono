@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2018 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * Copyright (C) 2014-2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of Jolla Ltd nor the names of its contributors may
- *      be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived from
+ *      this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -231,7 +231,11 @@ ofono_name_to_int(
             return entry->value;
         }
     }
-    GDEBUG("Unknown %s %s", map->name, name);
+#if GUTIL_LOG_DEBUG
+    if (g_strcmp0(name, map->defaults.name)) {
+        GDEBUG("Unknown %s %s", map->name, name);
+    }
+#endif /* GUTIL_LOG_DEBUG */
     return map->defaults.value;
 }
 
@@ -247,7 +251,11 @@ ofono_int_to_name(
             return entry->name;
         }
     }
-    GDEBUG("Invalid %s %d", map->name, value);
+#if GUTIL_LOG_DEBUG
+    if (value != map->defaults.value) {
+        GDEBUG("Invalid %s %d", map->name, value);
+    }
+#endif /* GUTIL_LOG_DEBUG */
     return map->defaults.name;
 }
 

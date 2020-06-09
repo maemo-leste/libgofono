@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2014-2016 Jolla Ltd.
- * Contact: Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2014-2020 Jolla Ltd.
+ * Copyright (C) 2014-2020 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -13,9 +13,9 @@
  *   2. Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *   3. Neither the name of the Jolla Ltd nor the names of its contributors
- *      may be used to endorse or promote products derived from this software
- *      without specific prior written permission.
+ *   3. Neither the names of the copyright holders nor the names of its
+ *      contributors may be used to endorse or promote products derived
+ *      from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -37,6 +37,26 @@
 
 G_BEGIN_DECLS
 
+typedef enum ofono_simmgr_pin {
+    OFONO_SIMMGR_PIN_UNKNOWN = -1,
+    OFONO_SIMMGR_PIN_NONE,              /* none */
+    OFONO_SIMMGR_PIN_PIN,               /* pin */
+    OFONO_SIMMGR_PIN_PHONE,             /* phone */
+    OFONO_SIMMGR_PIN_FIRSTPHONE,        /* firstphone */
+    OFONO_SIMMGR_PIN_PIN2,              /* pin2 */
+    OFONO_SIMMGR_PIN_NETWORK,           /* network */
+    OFONO_SIMMGR_PIN_NETSUB,            /* netsub */
+    OFONO_SIMMGR_PIN_SERVICE,           /* service */
+    OFONO_SIMMGR_PIN_CORP,              /* corp */
+    OFONO_SIMMGR_PIN_PUK,               /* puk */
+    OFONO_SIMMGR_PIN_FIRSTPHONEPUK,     /* firstphonepuk */
+    OFONO_SIMMGR_PIN_PUK2,              /* puk2 */
+    OFONO_SIMMGR_PIN_NETWORKPUK,        /* networkpuk */
+    OFONO_SIMMGR_PIN_NETSUBPUK,         /* netsubpuk */
+    OFONO_SIMMGR_PIN_SERVICEPUK,        /* servicepuk */
+    OFONO_SIMMGR_PIN_CORPPUK            /* corppuk */
+} OFONO_SIMMGR_PIN;
+
 typedef struct ofono_simmgr_priv OfonoSimMgrPriv;
 
 struct ofono_simmgr {
@@ -47,6 +67,8 @@ struct ofono_simmgr {
     const char* mcc;                    /* MobileCountryCode */
     const char* mnc;                    /* MobileNetworkCode */
     const char* spn;                    /* ServiceProviderName */
+    /* Since 2.0.8 */
+    OFONO_SIMMGR_PIN  pin_required;     /* PinRequired */
 };
 
 GType ofono_simmgr_get_type(void);
@@ -79,6 +101,37 @@ ofono_simmgr_ref(
 void
 ofono_simmgr_unref(
     OfonoSimMgr* sim);
+
+/* Methods */
+
+/* TODO: Make async */
+gboolean ofono_simmgr_enter_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
+gboolean ofono_simmgr_change_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* oldpin,
+    const gchar* newpin);
+
+gboolean ofono_simmgr_reset_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* puk,
+    const gchar* newpin);
+
+gboolean ofono_simmgr_lock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
+gboolean ofono_simmgr_unlock_pin(
+    OfonoSimMgr* self,
+    const gchar* type,
+    const gchar* pin);
+
 
 /* Properties */
 
@@ -124,6 +177,12 @@ ofono_simmgr_add_present_changed_handler(
     OfonoSimMgr* sim,
     OfonoSimMgrHandler handler,
     void* arg);
+
+gulong
+ofono_simmgr_add_pin_required_changed_handler(
+    OfonoSimMgr* sim,
+    OfonoSimMgrHandler handler,
+    void* arg); /* Since 2.0.8 */
 
 void
 ofono_simmgr_remove_handler(
